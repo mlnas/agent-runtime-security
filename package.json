@@ -1,0 +1,22 @@
+{
+  "name": "agent-runtime-security",
+  "version": "0.1.0",
+  "description": "Agent Runtime Security Demo MVP",
+  "private": true,
+  "scripts": {
+    "install:all": "cd core && npm install && cd ../gateway && npm install && cd .. && npm install",
+    "build:all": "cd core && npm run build && cd ../gateway && npm run build",
+    "start:gateway": "cd gateway && npm run dev",
+    "demo": "ts-node demo.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/uuid": "^10.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "axios": "^1.6.5",
+    "uuid": "^9.0.1"
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "version": "0.1.0",
+  "generated_at": "2026-01-21T00:00:00.000Z",
+  "expires_at": "2027-01-21T00:00:00.000Z",
+  "rules": [
+    {
+      "id": "DENY_BULK_EXPORT",
+      "description": "Block bulk export or data dump attempts from customer database",
+      "match": {
+        "tool_name": "query_customer_db",
+        "environment": "*"
+      },
+      "when": {
+        "contains_any": ["all customers", "export", "dump", "select *", "bulk"]
+      },
+      "outcome": "DENY"
+    },
+    {
+      "id": "DENY_PCI_EMAIL",
+      "description": "Block sending PCI data via email",
+      "match": {
+        "tool_name": "send_email",
+        "environment": "*"
+      },
+      "when": {
+        "data_labels_any": ["PCI"]
+      },
+      "outcome": "DENY"
+    },
+    {
+      "id": "DENY_PII_EXTERNAL",
+      "description": "Block sending PII data to external systems",
+      "match": {
+        "tool_name": "send_email",
+        "environment": "*"
+      },
+      "when": {
+        "data_labels_any": ["PII"]
+      },
+      "outcome": "DENY"
+    },
+    {
+      "id": "REQUIRE_APPROVAL_REFUND_PROD",
+      "description": "Require approval for refund operations in production",
+      "match": {
+        "tool_name": "trigger_refund",
+        "environment": "prod"
+      },
+      "outcome": "REQUIRE_APPROVAL",
+      "approver_role": "finance_manager"
+    },
+    {
+      "id": "REQUIRE_APPROVAL_PAYMENT_PROD",
+      "description": "Require approval for payment operations in production",
+      "match": {
+        "tool_name": "trigger_payment",
+        "environment": "prod"
+      },
+      "outcome": "REQUIRE_APPROVAL",
+      "approver_role": "finance_manager"
+    },
+    {
+      "id": "REQUIRE_APPROVAL_EMAIL_PROD",
+      "description": "Require approval for sending emails in production",
+      "match": {
+        "tool_name": "send_email",
+        "environment": "prod"
+      },
+      "outcome": "REQUIRE_APPROVAL",
+      "approver_role": "ops_manager"
+    },
+    {
+      "id": "ALLOW_DEV_STAGING",
+      "description": "Allow all actions in dev and staging environments",
+      "match": {
+        "tool_name": "*",
+        "environment": "dev"
+      },
+      "outcome": "ALLOW"
+    },
+    {
+      "id": "ALLOW_STAGING",
+      "description": "Allow all actions in staging environment",
+      "match": {
+        "tool_name": "*",
+        "environment": "staging"
+      },
+      "outcome": "ALLOW"
+    }
+  ],
+  "defaults": {
+    "outcome": "ALLOW"
+  }
+}
