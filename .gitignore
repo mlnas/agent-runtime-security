@@ -29,3 +29,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Personal notes (don't commit)
+MISSING.md

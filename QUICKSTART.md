@@ -1,180 +1,283 @@
-# Agent Runtime Security - Quick Start Guide
+# Quick Start Guide
 
-This is a demo MVP of an Agentic AI Runtime Security Layer that enforces runtime policies for AI agent tool calls.
+Get started with the Agent Runtime Security SDK in 5 minutes.
 
-## Architecture
-
-- **core**: Shared policy evaluation engine (no HTTP, no databases, no UI)
-- **gateway**: HTTP enforcement runtime that intercepts tool calls and enforces decisions
-- **default-policy.json**: Default policy bundle with sensible security rules
-
-## Quick Start
-
-### 1. Install Dependencies
+## Installation
 
 ```bash
+# If you cloned the repo
 npm run install:all
+npm run build
+
+# Or install as a package (when published)
+npm install @agent-security/core
 ```
 
-This will install dependencies for:
-- Root project (demo script dependencies)
-- Core engine
-- Gateway server
+## Basic Usage
 
-### 2. Build TypeScript
+### 1. Create Your Policy
 
-```bash
-npm run build:all
+Create `policy.json`:
+
+```json
+{
+  "version": "0.1.0",
+  "generated_at": "2026-01-29T00:00:00.000Z",
+  "expires_at": "2027-01-29T00:00:00.000Z",
+  "rules": [
+    {
+      "id": "DENY_DANGEROUS_OPERATIONS",
+      "description": "Block potentially dangerous database operations",
+      "match": {
+        "tool_name": "query_database",
+        "environment": "*"
+      },
+      "when": {
+        "contains_any": ["DROP", "DELETE", "TRUNCATE"]
+      },
+      "outcome": "DENY"
+    },
+    {
+      "id": "REQUIRE_APPROVAL_PROD_EMAIL",
+      "description": "Emails in production need approval",
+      "match": {
+        "tool_name": "send_email",
+        "environment": "prod"
+      },
+      "outcome": "REQUIRE_APPROVAL",
+      "approver_role": "ops_manager"
+    }
+  ],
+  "defaults": {
+    "outcome": "ALLOW"
+  }
+}
 ```
 
-This compiles the TypeScript code for both core and gateway.
+### 2. Initialize the SDK
 
-### 3. Start the Gateway Server
+```typescript
+import { AgentSecurity } from '@agent-security/core';
 
-In one terminal:
-
-```bash
-npm run start:gateway
+const security = new AgentSecurity({
+  policyPath: './policy.json',
+  
+  // Optional: Handle approval requests
+  onApprovalRequired: async (request, decision) => {
+    console.log('Approval needed for:', request.action.tool_name);
+    // Integrate with your approval system (Slack, etc.)
+    return await getApprovalFromManager(request);
+  },
+  
+  // Optional: Get notified of denials
+  onDeny: (request, decision) => {
+    console.error('Action blocked:', decision.reasons);
+  },
+  
+  // Optional: Log all decisions
+  onAuditEvent: (event) => {
+    auditLogger.log(event);
+  }
+});
 ```
 
-The gateway will start on `http://localhost:3000` and load the default policy bundle.
+### 3. Check Before Executing Tools
 
-### 4. Run the Demo
+```typescript
+async function executeAgentTool(toolName: string, args: any) {
+  // Check security policy
+  const result = await security.checkToolCall({
+    toolName,
+    toolArgs: args,
+    agentId: 'my-agent-001',
+    environment: 'prod'
+  });
 
-In another terminal:
+  if (result.allowed) {
+    // Safe to execute
+    return await actualToolExecution(toolName, args);
+  } else {
+    // Blocked by policy
+    throw new Error(`Blocked: ${result.decision.reasons[0].message}`);
+  }
+}
+```
+
+## Run the Demos
+
+### Full Demo (8 scenarios)
 
 ```bash
 npm run demo
 ```
 
-This will run a series of test scenarios demonstrating:
-- ✅ **ALLOW**: Safe actions in dev/staging environments
-- ❌ **DENY**: Blocked bulk exports and PCI data transmission
-- ⏳ **REQUIRE_APPROVAL**: Financial operations and production emails requiring approval
-- 📋 **Approval workflow**: Approving/rejecting pending requests
-- 📊 **Audit log**: Viewing all security events
+This demonstrates:
+- ALLOW decisions for safe operations
+- DENY decisions for dangerous operations
+- REQUIRE_APPROVAL workflow with approve/reject
+- Full audit trail
 
-## Demo Scenarios
-
-The demo script tests 8 scenarios to demonstrate all three policy decision types:
-
-**Scenario 1: ALLOW - Safe Dev Action**
-- Queries database in dev environment
-- Result: Allowed by default policy (200)
-
-**Scenario 2: DENY - Bulk Export Attempt**
-- Tries to export all customers from production database
-- Matches `DENY_BULK_EXPORT` rule (contains "export" keyword)
-- Result: Blocked (403)
-
-**Scenario 3: REQUIRE_APPROVAL - Production Email**
-- Sends email in production environment
-- Matches `REQUIRE_APPROVAL_EMAIL_PROD` rule
-- Result: Approval required (202)
-
-**Scenario 4: REQUIRE_APPROVAL - Production Payment**
-- Triggers payment in production environment
-- Matches `REQUIRE_APPROVAL_PAYMENT_PROD` rule
-- Result: Approval required (202)
-
-**Scenario 5: REQUIRE_APPROVAL - Another Production Email**
-- Creates another pending approval for demonstration
-
-**Scenario 6: List Pending Approvals**
-- Fetches all approval requests with status PENDING
-- Shows approval_id, tool_name, agent_id, created_at
-
-**Scenario 7: Approve Payment**
-- Approves the payment from Scenario 4
-- Tool executes (mocked) and returns result
-- Logs APPROVED and ALLOW events
-
-**Scenario 8: Reject Email**
-- Rejects the email from Scenario 5
-- Tool does not execute
-- Logs REJECTED event
-
-After running, check `gateway/logs/events.jsonl` to see the complete audit trail.
-
-## API Endpoints
-
-### Tool Call Interception
-```
-POST /tool-call
-Body: AgentActionRequest (see docs/schemas.md)
-```
-
-### Approvals
-```
-GET  /approvals
-POST /approvals/:approval_id/approve
-POST /approvals/:approval_id/reject
-```
-
-## Default Policy Rules
-
-The default policy bundle includes:
-
-1. **DENY** bulk export attempts from customer database
-2. **DENY** sending PCI/PII data via email
-3. **REQUIRE_APPROVAL** for financial operations (payments, refunds) in production
-4. **REQUIRE_APPROVAL** for sending emails in production
-5. **ALLOW** all actions in dev/staging environments by default
-
-## Testing Custom Scenarios
-
-You can create custom AgentActionRequest payloads and send them to the gateway:
+### Quick Demo (3 scenarios)
 
 ```bash
-curl -X POST http://localhost:3000/tool-call \
-  -H "Content-Type: application/json" \
-  -d '{
-    "request_id": "test-123",
-    "timestamp": "2026-01-21T10:00:00.000Z",
-    "agent": {
-      "agent_id": "my-agent",
-      "name": "MyAgent",
-      "owner": "dev@example.com",
-      "environment": "prod"
-    },
-    "action": {
-      "type": "tool_call",
-      "tool_name": "query_database",
-      "tool_args": {"query": "SELECT * FROM users"}
-    },
-    "context": {}
-  }'
+npm run demo:quick
 ```
 
-## Audit Logs
+A simplified demo showing the three decision types.
 
-Audit logs are written to `gateway/logs/` in JSONL format (append-only).
+## What You'll See
 
-Each event includes:
-- Event ID and timestamp
-- Request ID and agent ID
-- Tool name and outcome (ALLOW/DENY/REQUIRE_APPROVAL/APPROVED/REJECTED)
-- Reasons for the decision
-- Redacted payload (safe for audit)
+```
+╔════════════════════════════════════════════════════════════╗
+║     Agent Runtime Security SDK - Demo                      ║
+╚════════════════════════════════════════════════════════════╝
 
-## Customizing Policies
+============================================================
+Test 1: Safe Dev Action (should ALLOW)
+============================================================
 
-Edit `default-policy.json` to add or modify rules. Each rule can:
+✅ ALLOWED
+  Tool: query_database
+  Agent: agent-001
+  Reason: No specific rule matched; applying default policy
+  📝 Event logged: abc123 (ALLOW)
+  ➜ Tool execution would proceed here
 
-- **Match** on tool name and environment
-- **Filter** on text content (contains_any) or data labels (data_labels_any)
-- **Decide** ALLOW, DENY, or REQUIRE_APPROVAL
-- **Specify** an approver role for approval workflows
+============================================================
+Test 2: Bulk Export Attempt (should DENY)
+============================================================
 
-After editing, restart the gateway to load the new policy.
+❌ DENIED
+  Tool: query_customer_db
+  Agent: agent-002
+  Reason: Block bulk export or data dump attempts
+  📝 Event logged: def456 (DENY)
+  ➜ Tool execution blocked
+```
+
+## Advanced Usage
+
+### Protect Any Function
+
+Wrap your existing functions with automatic security checks:
+
+```typescript
+const protectedFunction = security.protect(
+  'my_tool',
+  async (arg1: string, arg2: number) => {
+    // Your tool logic
+    return await doSomething(arg1, arg2);
+  },
+  {
+    agentId: 'my-agent',
+    environment: 'prod',
+    extractToolArgs: (arg1, arg2) => ({ arg1, arg2 })
+  }
+);
+
+// Automatically checked before execution
+await protectedFunction('hello', 42);
+```
+
+### Custom Approval Workflow
+
+```typescript
+const security = new AgentSecurity({
+  policyPath: './policy.json',
+  
+  onApprovalRequired: async (request, decision) => {
+    // Send to Slack
+    const slackResponse = await slack.sendMessage({
+      channel: '#approvals',
+      text: `Approval needed for ${request.action.tool_name}`,
+      buttons: ['Approve', 'Deny']
+    });
+    
+    // Wait for user response
+    const approved = await slackResponse.waitForInteraction();
+    return approved;
+  }
+});
+```
+
+### Access Audit Trail
+
+```typescript
+// Get all audit events
+const events = security.getAuditLog();
+
+events.forEach(event => {
+  console.log(`${event.timestamp}: ${event.outcome} - ${event.tool_name}`);
+});
+
+// Clear history (e.g., after sending to external storage)
+security.clearAuditLog();
+```
+
+## Policy Development Tips
+
+1. **Start Permissive**: Begin with default ALLOW and add specific DENY rules
+2. **Test in Dev First**: Use environment matching to test policies safely
+3. **Use Keywords Carefully**: The `contains_any` matcher is case-insensitive
+4. **Version Your Policies**: Treat policies like code - use Git
+5. **Monitor Audit Logs**: Review what's being blocked/allowed
+
+## Common Patterns
+
+### Development vs Production
+
+```json
+{
+  "rules": [
+    {
+      "id": "ALLOW_DEV",
+      "match": { "tool_name": "*", "environment": "dev" },
+      "outcome": "ALLOW"
+    },
+    {
+      "id": "REQUIRE_APPROVAL_PROD",
+      "match": { "tool_name": "dangerous_tool", "environment": "prod" },
+      "outcome": "REQUIRE_APPROVAL"
+    }
+  ]
+}
+```
+
+### Keyword-Based Blocking
+
+```json
+{
+  "id": "DENY_SQL_INJECTION",
+  "match": { "tool_name": "query_database", "environment": "*" },
+  "when": {
+    "contains_any": ["DROP", "DELETE", "TRUNCATE", "--", ";--"]
+  },
+  "outcome": "DENY"
+}
+```
+
+### Data Label Protection
+
+```json
+{
+  "id": "DENY_PII_EXPORT",
+  "match": { "tool_name": "send_email", "environment": "*" },
+  "when": {
+    "data_labels_any": ["PII", "PCI", "PHI"]
+  },
+  "outcome": "DENY"
+}
+```
 
 ## Next Steps
 
-For production deployment, consider:
-- Multi-tenant authentication
-- Policy bundle signing and verification
-- Distributed audit log storage
-- Advanced approval workflows (Slack integration, etc.)
-- RBAC and SSO integration
+- Read the [Policy Writing Guide](./docs/policy-guide.md)
+- Check out [Integration Examples](./docs/integrations/)
+- Review the [API Reference](./docs/api-reference.md)
+- See [Architecture Overview](./docs/architecture.md)
 
-See `docs/` for detailed architecture and schemas.
+## Need Help?
+
+- Check existing [GitHub Issues](https://github.com/your-org/agent-runtime-security/issues)
+- Start a [Discussion](https://github.com/your-org/agent-runtime-security/discussions)
+- Review the demo code in `demo.ts`

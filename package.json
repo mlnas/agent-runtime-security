@@ -1,13 +1,13 @@
 {
   "name": "agent-runtime-security",
   "version": "0.1.0",
-  "description": "Agent Runtime Security Demo MVP",
+  "description": "Open-source SDK for adding runtime security policies to AI agents",
   "private": true,
   "scripts": {
-    "install:all": "cd core && npm install && cd ../gateway && npm install && cd .. && npm install",
-    "build:all": "cd core && npm run build && cd ../gateway && npm run build",
-    "start:gateway": "cd gateway && npm run dev",
-    "demo": "ts-node demo.ts"
+    "install:all": "cd core && npm install && cd .. && npm install",
+    "build": "cd core && npm run build",
+    "demo": "npm run build && ts-node demo.ts",
+    "demo:quick": "npm run build && ts-node test-demo.ts"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
@@ -16,7 +16,6 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
-    "axios": "^1.6.5",
     "uuid": "^9.0.1"
   }
 }

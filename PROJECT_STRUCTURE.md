@@ -3,158 +3,246 @@
 ```
 agent-runtime-security/
 │
-├── README.md                   # Main project overview
-├── QUICKSTART.md              # Quick start guide with commands
-├── IMPLEMENTATION.md          # Detailed implementation summary
+├── README.md                   # SDK overview and quick start
+├── QUICKSTART.md              # Detailed getting started guide
+├── IMPLEMENTATION.md          # Implementation notes
 ├── PROJECT_STRUCTURE.md       # This file
-├── setup.sh                   # Automated setup script
-├── package.json               # Root package.json with scripts
-├── demo.ts                    # Demo script to test the system
-├── default-policy.json        # Default policy bundle
-├── .gitignore                 # Git ignore file
+├── package.json               # Root package (demos)
+├── demo.ts                    # Full demo with all scenarios
+├── test-demo.ts               # Quick 3-scenario demo
+├── default-policy.json        # Example policy bundle
+├── .gitignore                 # Git ignore
 │
-├── docs/                      # Documentation (requirements)
-│   ├── architecture.md        # System architecture specification
-│   ├── schemas.md            # Canonical schemas (DO NOT CHANGE)
-│   ├── policies.md           # Default policy objectives
-│   └── build-order.md        # Implementation phases
-│
-├── core/                      # Core policy evaluation engine
-│   ├── package.json          # Core dependencies
+├── core/                      # Core SDK package
+│   ├── package.json          # @agent-security/core
 │   ├── tsconfig.json         # TypeScript config
 │   ├── src/
-│   │   ├── schemas.ts        # Type definitions matching docs/schemas.md
-│   │   ├── loader.ts         # PolicyBundleLoader
-│   │   ├── evaluator.ts      # PolicyEvaluator (Request → Decision)
-│   │   └── index.ts          # Export module
-│   └── dist/                 # Compiled JavaScript (generated)
+│   │   ├── schemas.ts        # TypeScript type definitions
+│   │   ├── loader.ts         # Policy bundle loader
+│   │   ├── evaluator.ts      # Policy evaluation engine
+│   │   ├── events.ts         # Audit event generator
+│   │   ├── default-policy.ts # Default policy factory
+│   │   ├── sdk.ts            # Main SDK client (NEW)
+│   │   └── index.ts          # Public exports
+│   └── dist/                 # Compiled output (generated)
 │
-├── gateway/                   # Gateway enforcement runtime
-│   ├── package.json          # Gateway dependencies
-│   ├── tsconfig.json         # TypeScript config
-│   ├── src/
-│   │   ├── server.ts         # Express HTTP server with enforcement
-│   │   ├── audit-log.ts      # Append-only JSONL audit log writer
-│   │   ├── approval-manager.ts # In-memory approval workflow
-│   │   └── index.ts          # Main entry point
-│   ├── dist/                 # Compiled JavaScript (generated)
-│   └── logs/                 # Audit logs directory (generated)
+├── examples/                  # Integration examples (NEW)
+│   ├── README.md             # Examples overview
+│   ├── basic-usage.ts        # Simple integration
+│   ├── custom-approval.ts    # Custom approval workflow
+│   ├── protect-wrapper.ts    # Using protect() wrapper
+│   └── langchain-integration.ts # LangChain integration
 │
-├── control-plane/             # Future: Policy management UI
-│   └── (empty - Phase 2)
-│
-└── sdk/                       # Future: Developer SDK
-    └── (empty - Phase 2)
+└── docs/                      # Documentation
+    ├── architecture.md        # SDK architecture
+    ├── schemas.md            # Schema specifications
+    ├── policies.md           # Policy writing guide
+    └── build-order.md        # Development phases
 ```
 
-## Module Descriptions
+## What Changed
+
+### Removed (Gateway-based approach)
+- ❌ `gateway/` - Separate HTTP server
+- ❌ `setup.sh` - Complex setup script
+- ❌ `docs/production-roadmap.md` - SaaS deployment docs
+- ❌ HTTP client dependencies (axios)
+- ❌ Express server code
+
+### Added (SDK-first approach)
+- ✅ `core/src/sdk.ts` - Main SDK client
+- ✅ `examples/` - Integration examples
+- ✅ Updated demos using SDK directly
+- ✅ SDK-focused documentation
+
+## Module Structure
 
 ### Core (`/core`)
-- **Purpose**: Shared policy evaluation engine
-- **Exports**: Schemas, PolicyBundleLoader, PolicyEvaluator
-- **Dependencies**: None (pure logic, no HTTP/DB)
-- **Used by**: Gateway, future SDK
+**Purpose**: The SDK package that enterprises install
 
-### Gateway (`/gateway`)
-- **Purpose**: HTTP enforcement runtime
-- **Exports**: GatewayServer, AuditLog, ApprovalManager
-- **Dependencies**: Core engine, Express
-- **Runs as**: Standalone HTTP server on port 3000
+**Exports**:
+- `AgentSecurity` - Main SDK client class
+- `SecurityError` - Custom error for blocked actions
+- Type definitions (schemas)
+- Policy loader and evaluator
+
+**Usage**:
+```typescript
+import { AgentSecurity } from '@agent-security/core';
+```
+
+### Examples (`/examples`)
+**Purpose**: Integration patterns and reference implementations
+
+**Contents**:
+- Basic usage example
+- Custom approval workflows
+- Function wrappers with `protect()`
+- Agent framework integration
 
 ### Docs (`/docs`)
-- **Purpose**: Specification and requirements
-- **Status**: Complete and authoritative
-- **Files are**: Read-only (do not modify)
+**Purpose**: Technical documentation
 
-### Root Files
-- **demo.ts**: Comprehensive test scenarios
-- **default-policy.json**: Production-ready policy bundle
-- **setup.sh**: Automated setup script
-- **package.json**: Scripts for build/run/demo
+**Files**:
+- `architecture.md` - How the SDK works
+- `schemas.md` - Type specifications
+- `policies.md` - Policy writing guide
+- `build-order.md` - Development roadmap
 
-## Data Flow
+## Key Files
+
+### SDK Implementation
+- `core/src/sdk.ts` - Main SDK client with all features
+- `core/src/evaluator.ts` - Policy rule evaluation
+- `core/src/loader.ts` - Policy bundle loading/validation
+- `core/src/events.ts` - Audit event generation
+
+### Demos
+- `demo.ts` - Comprehensive demo (8 scenarios)
+- `test-demo.ts` - Quick demo (3 scenarios)
+- `default-policy.json` - Example policy bundle
+
+### Examples
+- `examples/basic-usage.ts` - Simplest integration
+- `examples/protect-wrapper.ts` - Function wrapping
+- `examples/custom-approval.ts` - Custom workflows
+- `examples/langchain-integration.ts` - Framework integration
+
+## Data Flow (New SDK Architecture)
 
 ```
-Agent Tool Call Request
+Your Agent Code
     ↓
-Gateway Server (:3000)
+AgentSecurity.checkToolCall()
     ↓
-Core Evaluator
+PolicyEvaluator.evaluate()
     ↓
 Decision (ALLOW/DENY/REQUIRE_APPROVAL)
     ↓
-Gateway Enforcement
-    ├─→ ALLOW: Return 200 + forward
-    ├─→ DENY: Return 403 + block
-    └─→ REQUIRE_APPROVAL: Return 202 + create pending approval
-         ↓
-    Approval Endpoint
-         ├─→ /approve: Mark approved
-         └─→ /reject: Mark rejected
+Callbacks (onAllow/onDeny/onApprovalRequired)
     ↓
-Audit Log (JSONL)
+Your Integration (Slack/Email/etc.)
+    ↓
+Return allowed=true/false
+    ↓
+Execute or block tool
 ```
 
-## Key Files by Function
+## Build Process
 
-### Schema Definitions
-- `core/src/schemas.ts` - All TypeScript interfaces
-- `docs/schemas.md` - Schema specification
+```bash
+# Install dependencies
+npm run install:all
 
-### Policy Engine
-- `core/src/loader.ts` - Load and validate policy bundles
-- `core/src/evaluator.ts` - Evaluate requests against rules
-- `default-policy.json` - Default policy bundle
+# Build TypeScript
+npm run build
 
-### Enforcement
-- `gateway/src/server.ts` - HTTP server and endpoints
-- `gateway/src/approval-manager.ts` - Approval workflow
+# Run demos
+npm run demo           # Full demo
+npm run demo:quick     # Quick demo
+```
 
-### Audit
-- `gateway/src/audit-log.ts` - Append-only JSONL writer
-- `gateway/logs/*.jsonl` - Event logs (generated)
+## Development Workflow
 
-### Testing
-- `demo.ts` - Comprehensive demo scenarios
+1. **Policy Development**
+   - Edit `default-policy.json`
+   - Test with demos
+   - Iterate on rules
 
-## Build Artifacts (Generated)
+2. **SDK Development**
+   - Edit `core/src/*.ts`
+   - Run `npm run build`
+   - Test with demos
 
-These directories are created during build:
-- `core/dist/` - Compiled core engine
-- `gateway/dist/` - Compiled gateway server
-- `gateway/logs/` - Audit log files
-- `node_modules/` - Dependencies (3 locations)
+3. **Integration Development**
+   - Create new examples in `examples/`
+   - Document patterns
+   - Share with community
 
-All build artifacts are git-ignored.
+## What's Implemented
 
-## Phase 1 Implementation Status
+✅ **Core SDK**
+- Policy evaluation engine
+- Rule matching and conditions
+- Three decision types
+- Audit event generation
+- SDK client with callbacks
+- Function wrapper (`protect()`)
 
-✅ **Completed**:
-- Core engine with schema validation
-- Policy bundle loader and evaluator
-- Gateway HTTP server
-- Decision enforcement (ALLOW/DENY/REQUIRE_APPROVAL)
-- Approval workflow via REST API
-- Append-only audit log (JSONL)
-- Default policy bundle
-- Demo script
-- Documentation
+✅ **Demos**
+- Full demo with 8 scenarios
+- Quick 3-scenario demo
+- Example policy bundle
+- Audit trail display
 
-❌ **Not Implemented** (Phase 2):
-- control-plane/ - Policy management UI
-- sdk/ - Developer SDK wrapper
-- Multi-tenant features
-- RBAC/SSO
-- Slack integration
+✅ **Examples**
+- Basic usage
+- Custom approvals
+- Function wrappers
+- Framework integration
+
+✅ **Documentation**
+- SDK-focused README
+- Quick start guide
+- Architecture overview
+- Integration patterns
+
+## What's NOT Included
+
+❌ **Infrastructure** (by design)
+- No HTTP gateway
+- No separate server
+- No deployment complexity
+- No authentication layer
+
+❌ **UI Components** (separate project)
+- No policy management UI
+- No approval dashboard
+- No visualization tools
+
+❌ **Advanced Features** (future)
 - Policy signing/verification
 - Distributed audit storage
+- Multi-tenant features
+- Advanced analytics
+
+## Integration Points
+
+### Where Enterprises Integrate
+
+1. **Agent Initialization**
+   ```typescript
+   const security = new AgentSecurity({...});
+   ```
+
+2. **Tool Execution**
+   ```typescript
+   await security.checkToolCall({...});
+   ```
+
+3. **Approval Workflow**
+   ```typescript
+   onApprovalRequired: async (req) => {...}
+   ```
+
+4. **Audit System**
+   ```typescript
+   onAuditEvent: (event) => {...}
+   ```
+
+## Target Deployment
+
+This SDK is designed to be:
+- **Installed**: via npm/yarn
+- **Imported**: directly into agent code
+- **Configured**: with JSON policy files
+- **Extended**: via callbacks and wrappers
+
+No infrastructure, no gateway, no deployment complexity.
 
 ## Next Steps
 
-1. Run `./setup.sh` to install and build
-2. Start gateway: `npm run start:gateway`
-3. Run demo: `npm run demo`
-4. Review audit logs in `gateway/logs/`
-5. Customize policies in `default-policy.json`
-
-See QUICKSTART.md for detailed instructions.
+1. Publish to npm as `@agent-security/core`
+2. Create framework-specific packages
+3. Build policy management tools (separate repo)
+4. Community examples and integrations
