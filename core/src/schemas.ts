@@ -175,6 +175,15 @@ export interface SecurityPlugin {
   readonly version?: string;
 
   /**
+   * If true, errors in this plugin are swallowed and execution continues (fail-open).
+   * If false (default), errors in this plugin cause the check to fail-closed (DENY).
+   *
+   * Security-critical plugins (kill switch, rate limiter) should use the
+   * default (false) so that a crash doesn't silently bypass protections.
+   */
+  readonly failOpen?: boolean;
+
+  /**
    * Called once when the plugin is registered with the SDK.
    * Use for setup, connecting to external services, etc.
    */

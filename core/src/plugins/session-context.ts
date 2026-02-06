@@ -1,4 +1,9 @@
-import { SecurityPlugin, BeforeCheckContext, PluginResult, Decision } from "../schemas";
+import {
+  SecurityPlugin,
+  BeforeCheckContext,
+  AfterDecisionContext,
+  PluginResult,
+} from "../schemas";
 
 /**
  * Session Context Plugin
@@ -6,6 +11,9 @@ import { SecurityPlugin, BeforeCheckContext, PluginResult, Decision } from "../s
  * Tracks state across multiple calls within a session or conversation.
  * Can enforce limits like "max 3 payments per session" or track
  * cumulative behavior patterns.
+ *
+ * The counter only increments after a successful decision (ALLOW or APPROVED),
+ * so denied calls don't consume the session budget.
  *
  * @example
  * ```typescript
@@ -78,6 +86,10 @@ export function sessionContext(config: SessionContextConfig = {}): SessionContex
     name: "session-context",
     version: "1.0.0",
 
+    /**
+     * Phase 1: Check session limits BEFORE policy evaluation.
+     * Only checks the count — does NOT increment.
+     */
     async beforeCheck(context: BeforeCheckContext): Promise<PluginResult | void> {
       const sessionId = context.request.context.session_id;
       if (!sessionId) return; // No session tracking without a session ID
@@ -104,11 +116,28 @@ export function sessionContext(config: SessionContextConfig = {}): SessionContex
         };
       }
 
-      // Increment the count
-      session.toolCounts.set(toolName, currentCount + 1);
-
       // Occasional cleanup
       if (Math.random() < 0.01) cleanup();
+    },
+
+    /**
+     * Phase 3: Increment the counter AFTER the decision is made.
+     * Only counts calls that were actually allowed (not denied).
+     */
+    async afterDecision(context: AfterDecisionContext): Promise<PluginResult | void> {
+      // Only increment for allowed or approval-required actions
+      if (context.decision.outcome === "DENY") return;
+
+      const sessionId = context.request.context.session_id;
+      if (!sessionId) return;
+
+      const toolName = context.request.action.tool_name;
+      const limit = limits[toolName];
+      if (!limit) return;
+
+      const session = getSession(sessionId);
+      const currentCount = session.toolCounts.get(toolName) || 0;
+      session.toolCounts.set(toolName, currentCount + 1);
     },
 
     getSessionToolCount(sessionId: string, toolName: string): number {

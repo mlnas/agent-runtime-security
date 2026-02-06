@@ -73,6 +73,7 @@ export function rateLimiter(config: RateLimiterConfig = {}): RateLimiterPlugin {
   const plugin: RateLimiterPlugin = {
     name: "rate-limiter",
     version: "1.0.0",
+    failOpen: false, // Security-critical: fail-closed on error
 
     async beforeCheck(context: BeforeCheckContext): Promise<PluginResult | void> {
       const now = Date.now();

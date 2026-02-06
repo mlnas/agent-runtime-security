@@ -1,19 +1,113 @@
 import { AgentActionRequest, Decision, PolicyBundle, PolicyRule } from "./schemas";
 
+// ---------------------------------------------------------------------------
+// Regex safety utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Known dangerous regex patterns that can cause catastrophic backtracking.
+ * Checks for nested quantifiers, overlapping alternations, etc.
+ */
+const DANGEROUS_REGEX_PATTERNS = [
+  /\(.*[+*].*\)[+*]/, // nested quantifiers: (a+)+, (a*)*
+  /\(.*\|.*\)[+*]/,   // alternation inside quantifier: (a|a)+
+  /\(.*[+*].*\)\{/,   // nested quantifier with repetition: (a+){2,}
+];
+
+const MAX_REGEX_LENGTH = 512;
+
+/**
+ * Validates that a regex pattern is safe from catastrophic backtracking.
+ * Returns true if the regex is considered safe.
+ */
+function isSafeRegex(pattern: string): boolean {
+  if (pattern.length > MAX_REGEX_LENGTH) return false;
+
+  for (const dangerous of DANGEROUS_REGEX_PATTERNS) {
+    if (dangerous.test(pattern)) return false;
+  }
+
+  // Verify it compiles
+  try {
+    new RegExp(pattern, "i");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pre-compile and cache a regex, or return null if it's unsafe/invalid.
+ */
+const regexCache = new Map<string, RegExp | null>();
+
+function getSafeRegex(pattern: string): RegExp | null {
+  if (regexCache.has(pattern)) return regexCache.get(pattern)!;
+
+  if (!isSafeRegex(pattern)) {
+    regexCache.set(pattern, null);
+    return null;
+  }
+
+  try {
+    const regex = new RegExp(pattern, "i");
+    regexCache.set(pattern, regex);
+    return regex;
+  } catch {
+    regexCache.set(pattern, null);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Searchable text utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively extract all string values from an object.
+ * Produces a flat array of strings without JSON structural characters.
+ */
+function extractStringValues(obj: unknown): string[] {
+  const values: string[] = [];
+
+  if (typeof obj === "string") {
+    values.push(obj);
+  } else if (typeof obj === "number" || typeof obj === "boolean") {
+    values.push(String(obj));
+  } else if (Array.isArray(obj)) {
+    for (const item of obj) {
+      values.push(...extractStringValues(item));
+    }
+  } else if (obj !== null && typeof obj === "object") {
+    for (const val of Object.values(obj)) {
+      values.push(...extractStringValues(val));
+    }
+  }
+
+  return values;
+}
+
+// ---------------------------------------------------------------------------
+// PolicyEvaluator
+// ---------------------------------------------------------------------------
+
 /**
  * PolicyEvaluator - evaluates agent actions against policy rules.
  *
  * Supports:
  *   - Exact tool name matching, wildcard "*", and array-of-names matching
  *   - Glob-style environment matching (any string or "*")
- *   - Keyword matching (contains_any, not_contains)
- *   - Regex matching (matches_regex)
+ *   - Keyword matching (contains_any, not_contains) on structured values
+ *   - Regex matching (matches_regex) with ReDoS protection
  *   - Data label matching (data_labels_any)
  *   - Tool arg matching (tool_args_match)
  *   - First-match rule processing with configurable default
  */
 export class PolicyEvaluator {
-  constructor(private policyBundle: PolicyBundle) {}
+  constructor(private policyBundle: PolicyBundle) {
+    // Pre-validate all regex patterns at construction time
+    this.precompileRegexPatterns();
+  }
 
   /**
    * Evaluate an agent action request and return a decision.
@@ -88,32 +182,33 @@ export class PolicyEvaluator {
 
     // contains_any — at least one keyword must appear in searchable text
     if (contains_any && contains_any.length > 0) {
-      const text = this.getSearchableText(request);
-      const matched = contains_any.some((term) =>
-        text.toLowerCase().includes(term.toLowerCase())
-      );
+      const searchValues = this.getSearchableValues(request);
+      const matched = contains_any.some((term) => {
+        const lowerTerm = term.toLowerCase();
+        return searchValues.some((val) => val.toLowerCase().includes(lowerTerm));
+      });
       if (!matched) return false;
     }
 
     // not_contains — none of these keywords should appear
     if (not_contains && not_contains.length > 0) {
-      const text = this.getSearchableText(request);
-      const matched = not_contains.some((term) =>
-        text.toLowerCase().includes(term.toLowerCase())
-      );
+      const searchValues = this.getSearchableValues(request);
+      const matched = not_contains.some((term) => {
+        const lowerTerm = term.toLowerCase();
+        return searchValues.some((val) => val.toLowerCase().includes(lowerTerm));
+      });
       if (matched) return false;
     }
 
-    // matches_regex — searchable text must match the pattern
+    // matches_regex — searchable text must match the pattern (with ReDoS protection)
     if (matches_regex) {
-      const text = this.getSearchableText(request);
-      try {
-        const regex = new RegExp(matches_regex, "i");
-        if (!regex.test(text)) return false;
-      } catch {
-        // Invalid regex — treat as non-match rather than crashing
+      const regex = getSafeRegex(matches_regex);
+      if (!regex) {
+        // Unsafe or invalid regex — fail closed (treat as non-match)
         return false;
       }
+      const searchText = this.getSearchableValues(request).join(" ");
+      if (!regex.test(searchText)) return false;
     }
 
     // data_labels_any — at least one label must be present
@@ -151,13 +246,15 @@ export class PolicyEvaluator {
   // -----------------------------------------------------------------------
 
   /**
-   * Build a single string from user_input + stringified tool_args for keyword matching.
+   * Extract all string values from user_input and tool_args for keyword matching.
+   * Uses structured extraction instead of JSON.stringify to avoid matching
+   * on JSON structural characters (keys, braces, quotes).
    */
-  private getSearchableText(request: AgentActionRequest): string {
-    const parts: string[] = [];
-    if (request.context.user_input) parts.push(request.context.user_input);
-    parts.push(JSON.stringify(request.action.tool_args));
-    return parts.join(" ");
+  private getSearchableValues(request: AgentActionRequest): string[] {
+    const values: string[] = [];
+    if (request.context.user_input) values.push(request.context.user_input);
+    values.push(...extractStringValues(request.action.tool_args));
+    return values;
   }
 
   /**
@@ -173,15 +270,37 @@ export class PolicyEvaluator {
     return decision;
   }
 
+  /**
+   * Pre-compile and validate all regex patterns in the policy bundle.
+   * Called at construction time to detect unsafe patterns early.
+   */
+  private precompileRegexPatterns(): void {
+    for (const rule of this.policyBundle.rules) {
+      if (rule.when?.matches_regex) {
+        const regex = getSafeRegex(rule.when.matches_regex);
+        if (!regex) {
+          console.warn(
+            `[PolicyEvaluator] Rule "${rule.id}" has an unsafe or invalid regex pattern: "${rule.when.matches_regex}". This rule's regex condition will never match.`
+          );
+        }
+      }
+    }
+  }
+
   // -----------------------------------------------------------------------
   // Public accessors
   // -----------------------------------------------------------------------
 
+  /**
+   * Returns a deep copy of the policy bundle to prevent external mutation.
+   */
   getPolicyBundle(): PolicyBundle {
-    return this.policyBundle;
+    return JSON.parse(JSON.stringify(this.policyBundle));
   }
 
   updatePolicyBundle(bundle: PolicyBundle): void {
     this.policyBundle = bundle;
+    regexCache.clear();
+    this.precompileRegexPatterns();
   }
 }

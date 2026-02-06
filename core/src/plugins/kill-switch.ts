@@ -7,24 +7,53 @@ import { SecurityPlugin, BeforeCheckContext, PluginResult, Decision } from "../s
  * When an agent is killed, all its tool calls are immediately denied
  * without reaching the policy engine.
  *
+ * Defaults to fail-closed (failOpen: false) so that if the plugin itself
+ * errors, the agent is denied rather than allowed through.
+ *
+ * Supports optional persistence callbacks so kill state survives process restarts.
+ *
  * @example
  * ```typescript
- * const ks = killSwitch();
+ * const ks = killSwitch({
+ *   // Optional: persist kill state to external store
+ *   onStateChange: async (state) => {
+ *     await redis.set('kill-switch-state', JSON.stringify(state));
+ *   },
+ *   // Optional: restore state on init
+ *   loadState: async () => {
+ *     const raw = await redis.get('kill-switch-state');
+ *     return raw ? JSON.parse(raw) : undefined;
+ *   },
+ * });
+ *
  * const security = new AgentSecurity({
  *   policyPath: './policy.json',
  *   plugins: [ks]
  * });
  *
- * // Emergency: disable a rogue agent
  * ks.kill('rogue-agent-001');
- *
- * // Re-enable after investigation
- * ks.revive('rogue-agent-001');
- *
- * // Nuclear option: disable ALL agents
- * ks.killAll();
  * ```
  */
+export interface KillSwitchConfig {
+  /**
+   * Called whenever kill state changes.
+   * Use to persist state to an external store (Redis, database, file, etc.).
+   */
+  onStateChange?: (state: KillSwitchState) => void | Promise<void>;
+
+  /**
+   * Called during plugin initialization to restore persisted state.
+   * Return the previously saved state, or undefined to start fresh.
+   */
+  loadState?: () => KillSwitchState | Promise<KillSwitchState | undefined> | undefined;
+}
+
+export interface KillSwitchState {
+  killedAgents: Record<string, string>; // agentId -> reason
+  globalKill: boolean;
+  globalReason: string;
+}
+
 export interface KillSwitchPlugin extends SecurityPlugin {
   /** Disable a specific agent. All its calls will be denied. */
   kill(agentId: string, reason?: string): void;
@@ -40,16 +69,61 @@ export interface KillSwitchPlugin extends SecurityPlugin {
   isGloballyKilled(): boolean;
   /** Get list of all killed agent IDs. */
   getKilledAgents(): string[];
+  /** Get a snapshot of the current state (for persistence). */
+  getState(): KillSwitchState;
 }
 
-export function killSwitch(): KillSwitchPlugin {
+export function killSwitch(config: KillSwitchConfig = {}): KillSwitchPlugin {
   const killedAgents = new Map<string, string>(); // agentId -> reason
   let globalKill = false;
   let globalReason = "";
 
+  function getState(): KillSwitchState {
+    const agents: Record<string, string> = {};
+    for (const [id, reason] of killedAgents) {
+      agents[id] = reason;
+    }
+    return { killedAgents: agents, globalKill, globalReason };
+  }
+
+  function notifyStateChange(): void {
+    if (config.onStateChange) {
+      try {
+        // Fire-and-forget; don't block the caller
+        const result = config.onStateChange(getState());
+        if (result instanceof Promise) {
+          result.catch(() => {}); // swallow async errors in persistence
+        }
+      } catch {
+        // swallow sync errors in persistence
+      }
+    }
+  }
+
   const plugin: KillSwitchPlugin = {
     name: "kill-switch",
     version: "1.0.0",
+    failOpen: false, // Security-critical: fail-closed on error
+
+    async initialize(): Promise<void> {
+      if (config.loadState) {
+        try {
+          const state = await config.loadState();
+          if (state) {
+            globalKill = state.globalKill ?? false;
+            globalReason = state.globalReason ?? "";
+            killedAgents.clear();
+            if (state.killedAgents) {
+              for (const [id, reason] of Object.entries(state.killedAgents)) {
+                killedAgents.set(id, reason);
+              }
+            }
+          }
+        } catch {
+          // If state loading fails, start with clean state (fail-safe)
+        }
+      }
+    },
 
     async beforeCheck(context: BeforeCheckContext): Promise<PluginResult | void> {
       const agentId = context.request.agent.agent_id;
@@ -77,21 +151,25 @@ export function killSwitch(): KillSwitchPlugin {
 
     kill(agentId: string, reason?: string): void {
       killedAgents.set(agentId, reason || `Agent ${agentId} disabled`);
+      notifyStateChange();
     },
 
     revive(agentId: string): void {
       killedAgents.delete(agentId);
+      notifyStateChange();
     },
 
     killAll(reason?: string): void {
       globalKill = true;
       globalReason = reason || "";
+      notifyStateChange();
     },
 
     reviveAll(): void {
       globalKill = false;
       globalReason = "";
       killedAgents.clear();
+      notifyStateChange();
     },
 
     isKilled(agentId: string): boolean {
@@ -105,6 +183,8 @@ export function killSwitch(): KillSwitchPlugin {
     getKilledAgents(): string[] {
       return Array.from(killedAgents.keys());
     },
+
+    getState,
   };
 
   return plugin;

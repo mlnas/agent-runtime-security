@@ -31,7 +31,7 @@ export { rateLimiter } from "./plugins/rate-limiter";
 export { sessionContext } from "./plugins/session-context";
 export { outputValidator } from "./plugins/output-validator";
 
-export type { KillSwitchPlugin } from "./plugins/kill-switch";
+export type { KillSwitchPlugin, KillSwitchConfig, KillSwitchState } from "./plugins/kill-switch";
 export type { RateLimiterConfig, RateLimiterPlugin } from "./plugins/rate-limiter";
 export type { SessionContextConfig, SessionContextPlugin } from "./plugins/session-context";
 export type { OutputValidatorConfig, OutputValidatorPlugin, OutputViolation } from "./plugins/output-validator";

@@ -89,6 +89,6 @@
     }
   ],
   "defaults": {
-    "outcome": "ALLOW"
+    "outcome": "DENY"
   }
 }
