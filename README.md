@@ -1,8 +1,8 @@
 # Agent Runtime Security SDK
 
-**Open-source SDK for adding runtime security policies to AI agents**
+**Open-source SDK for adding runtime security policies to AI agents.**
 
-Protect your AI agents with declarative security policies that run directly in your code. No gateway, no infrastructure, just `npm install` and integrate.
+Protect your AI agents with declarative security policies and a plugin architecture that runs directly in your code. No gateway, no infrastructure — just `npm install` and integrate.
 
 ## Why This SDK?
 
@@ -17,14 +17,18 @@ This SDK lets you define **security policies as code** and enforce them at runti
 
 ## Key Features
 
-✅ **Zero Infrastructure** - Runs in-process, no gateway or server needed  
-✅ **Policy as Code** - Define rules in JSON, version control with Git  
-✅ **Three Decision Types** - ALLOW, DENY, or REQUIRE_APPROVAL  
-✅ **Custom Approval Workflows** - Integrate with Slack, email, or any system  
-✅ **Full Audit Trail** - Every decision is logged for compliance  
-✅ **Framework Agnostic** - Works with LangChain, CrewAI, custom agents, etc.  
-✅ **TypeScript Native** - Full type safety and IDE autocomplete  
-✅ **Production Ready** - Built for enterprise integration  
+- **Zero Infrastructure** — Runs in-process, no gateway or server needed
+- **Plugin Architecture** — Extensible lifecycle hooks (beforeCheck, afterDecision, afterExecution)
+- **Policy as Code** — Define rules in JSON, version control with Git
+- **Three Decision Types** — ALLOW, DENY, or REQUIRE_APPROVAL
+- **Built-in Plugins** — Kill switch, rate limiter, session context, output validator
+- **Approval Timeouts** — Configurable timeout so approvals can't hang forever
+- **Custom Environments** — Any string (dev, staging, prod, sandbox, preview, etc.)
+- **Advanced Rule Matching** — Regex, numeric comparisons, array matching, glob prefixes
+- **Async Policy Loading** — Load policies from files, URLs, vaults, or custom sources
+- **Full Audit Trail** — Every decision is logged with plugin attribution
+- **Framework Agnostic** — Works with LangChain, CrewAI, custom agents, etc.
+- **TypeScript Native** — Full type safety and IDE autocomplete
 
 ## Quick Start
 
@@ -47,71 +51,61 @@ Create `policy.json`:
     {
       "id": "DENY_BULK_EXPORT",
       "description": "Block bulk data exports",
-      "match": {
-        "tool_name": "query_database",
-        "environment": "*"
-      },
-      "when": {
-        "contains_any": ["SELECT *", "export", "dump"]
-      },
+      "match": { "tool_name": "query_database", "environment": "*" },
+      "when": { "contains_any": ["SELECT *", "export", "dump"] },
       "outcome": "DENY"
     },
     {
       "id": "REQUIRE_APPROVAL_PAYMENT",
       "description": "Payments need approval in production",
-      "match": {
-        "tool_name": "trigger_payment",
-        "environment": "prod"
-      },
+      "match": { "tool_name": "trigger_payment", "environment": "prod" },
       "outcome": "REQUIRE_APPROVAL",
       "approver_role": "finance_manager"
     }
   ],
-  "defaults": {
-    "outcome": "ALLOW"
-  }
+  "defaults": { "outcome": "ALLOW" }
 }
 ```
 
 ### 3. Integrate with Your Agent
 
 ```typescript
-import { AgentSecurity } from '@agent-security/core';
+import { AgentSecurity, killSwitch, rateLimiter } from '@agent-security/core';
 
-// Initialize SDK
+const ks = killSwitch();
+
 const security = new AgentSecurity({
   policyPath: './policy.json',
+  plugins: [ks, rateLimiter({ maxPerMinute: 60 })],
+  approvalTimeoutMs: 300_000, // 5 minute timeout
+
   onApprovalRequired: async (request, decision) => {
-    // Your custom approval logic (Slack, email, etc.)
-    return await askManager(request);
+    return await askManager(request); // Slack, email, etc.
   },
   onDeny: (request, decision) => {
     logger.error('Action blocked', { request, decision });
-  }
+  },
 });
 
 // Before executing any tool, check the policy
-async function executeTool(toolName: string, args: any) {
-  const result = await security.checkToolCall({
-    toolName,
-    toolArgs: args,
-    agentId: 'my-agent',
-    environment: 'prod'
-  });
+const result = await security.checkToolCall({
+  toolName: 'send_email',
+  toolArgs: { to: 'user@example.com' },
+  agentId: 'my-agent',
+  environment: 'prod',
+});
 
-  if (result.allowed) {
-    // Execute the tool
-    return await actualToolExecution(toolName, args);
-  } else {
-    throw new Error('Security policy blocked this action');
-  }
+if (result.allowed) {
+  await sendEmail();
 }
+
+// Emergency: disable a rogue agent instantly
+ks.kill('rogue-agent-001', 'Suspicious bulk export pattern');
 ```
 
 ### 4. Or Use the Protect Wrapper
 
 ```typescript
-// Wrap any async function with security checks
 const sendEmail = security.protect(
   'send_email',
   async (to: string, subject: string, body: string) => {
@@ -120,7 +114,7 @@ const sendEmail = security.protect(
   {
     agentId: 'email-agent',
     environment: 'prod',
-    extractToolArgs: (to, subject, body) => ({ to, subject, body })
+    extractToolArgs: (to, subject, body) => ({ to, subject, body }),
   }
 );
 
@@ -128,183 +122,150 @@ const sendEmail = security.protect(
 await sendEmail('user@example.com', 'Hello', 'World');
 ```
 
-## How It Works
+## Plugin Architecture
 
-1. **Define Policies** - Create rules in JSON that match tool calls by name, environment, keywords, or data labels
-2. **Initialize SDK** - Load your policy and configure callbacks for approvals/denies
-3. **Check Before Execute** - Before any tool runs, call `security.checkToolCall()`
-4. **Handle Decision** - SDK returns ALLOW, DENY, or REQUIRE_APPROVAL
-5. **Audit Everything** - All decisions are logged automatically
+The SDK uses a phased plugin pipeline inspired by middleware patterns:
 
-## Policy Rules
-
-Each rule has:
-
-- **match**: Which tools and environments this applies to
-- **when**: Optional conditions (keywords, data labels)
-- **outcome**: ALLOW, DENY, or REQUIRE_APPROVAL
-- **approver_role**: Optional role required for approval
-
-### Example Rules
-
-**Block bulk exports:**
-```json
-{
-  "id": "DENY_BULK_EXPORT",
-  "match": { "tool_name": "query_database", "environment": "*" },
-  "when": { "contains_any": ["SELECT *", "export all"] },
-  "outcome": "DENY"
-}
+```
+Phase 1: beforeCheck    → Kill switch, rate limiting, session checks
+Phase 2: evaluate       → Core policy engine (rule matching)
+Phase 3: afterDecision  → Modify decisions, apply overrides
+Phase 4: callbacks      → onAllow / onDeny / onApprovalRequired
+Phase 5: afterExecution → Output validation (protect() only)
 ```
 
-**Require approval for financial operations:**
-```json
-{
-  "id": "APPROVE_PAYMENTS",
-  "match": { "tool_name": "trigger_payment", "environment": "prod" },
-  "outcome": "REQUIRE_APPROVAL",
-  "approver_role": "finance_manager"
-}
+### Built-in Plugins
+
+**Kill Switch** — Emergency agent disable:
+```typescript
+const ks = killSwitch();
+ks.kill('agent-id');    // Disable immediately
+ks.revive('agent-id');  // Re-enable
+ks.killAll();           // Nuclear option
 ```
 
-**Block PII/PCI data transmission:**
+**Rate Limiter** — Per-agent, per-tool rate limits:
+```typescript
+rateLimiter({ maxPerMinute: 60, maxPerMinutePerTool: 20 })
+```
+
+**Session Context** — Track state across calls:
+```typescript
+sessionContext({
+  limits: { trigger_payment: { maxPerSession: 3 } },
+  sessionTtlMs: 3600_000,
+})
+```
+
+**Output Validator** — Scan tool results for sensitive data:
+```typescript
+outputValidator({
+  sensitivePatterns: [/\b\d{3}-\d{2}-\d{4}\b/], // SSN
+  onSensitiveData: (tool, matches) => alert(tool, matches),
+})
+```
+
+### Custom Plugins
+
+```typescript
+const myPlugin: SecurityPlugin = {
+  name: 'my-plugin',
+  async beforeCheck(ctx) {
+    // Return { decision } to short-circuit, or void to continue
+  },
+  async afterDecision(ctx) {
+    // Modify or override the decision
+  },
+  async afterExecution(ctx) {
+    // Validate output, enrich audit, etc.
+  },
+};
+```
+
+## Advanced Policy Rules
+
+**Match multiple tools:**
 ```json
-{
-  "id": "DENY_SENSITIVE_DATA",
-  "match": { "tool_name": "send_email", "environment": "*" },
-  "when": { "data_labels_any": ["PII", "PCI"] },
-  "outcome": "DENY"
-}
+{ "match": { "tool_name": ["trigger_payment", "trigger_refund"], "environment": "prod" } }
+```
+
+**Glob prefix matching:**
+```json
+{ "match": { "tool_name": "query_*", "environment": "*" } }
+```
+
+**Regex matching:**
+```json
+{ "when": { "matches_regex": "^SELECT\\s+\\*" } }
+```
+
+**Numeric comparisons on tool args:**
+```json
+{ "when": { "tool_args_match": { "amount": { "gt": 1000 } } } }
+```
+
+**Negative matching:**
+```json
+{ "when": { "not_contains": ["safe_operation", "internal_only"] } }
 ```
 
 ## Run the Demo
 
 ```bash
-# Clone the repo
-git clone https://github.com/your-org/agent-runtime-security
+git clone https://github.com/mlnas/agent-runtime-security
 cd agent-runtime-security
 
-# Install dependencies
 npm run install:all
-
-# Run the full demo
-npm run demo
-
-# Or run the quick 3-scenario demo
-npm run demo:quick
+npm run demo          # Full demo (9 scenarios)
+npm run demo:quick    # Quick demo (5 scenarios)
 ```
 
-The demo shows:
-- ✅ Safe actions being allowed
-- ❌ Dangerous actions being denied
-- ⏳ Sensitive actions requiring approval
-- 📝 Full audit trail capture
-
-## Integration Examples
-
-### LangChain
-
-```typescript
-import { AgentSecurity } from '@agent-security/core';
-import { Tool } from 'langchain/tools';
-
-const security = new AgentSecurity({ policyPath: './policy.json' });
-
-class SecureTool extends Tool {
-  async _call(input: string): Promise<string> {
-    const result = await security.checkToolCall({
-      toolName: this.name,
-      toolArgs: { input },
-      agentId: 'langchain-agent',
-      environment: 'prod'
-    });
-
-    if (!result.allowed) {
-      throw new Error(`Blocked by security policy: ${result.decision.reasons[0].message}`);
-    }
-
-    return await this.actualToolLogic(input);
-  }
-}
-```
-
-### Custom Agent Framework
-
-```typescript
-class MyAgent {
-  constructor(private security: AgentSecurity) {}
-
-  async executeAction(action: Action) {
-    const result = await this.security.checkToolCall({
-      toolName: action.tool,
-      toolArgs: action.args,
-      agentId: this.id,
-      environment: this.environment,
-      userInput: action.userPrompt
-    });
-
-    if (!result.allowed) {
-      return { error: 'Action blocked by security policy' };
-    }
-
-    return await this.runTool(action);
-  }
-}
-```
+The demo shows: policy decisions, kill switch, rate limiter, session limits, approval workflows, and audit trail with plugin attribution.
 
 ## API Reference
 
-### AgentSecurity
+### AgentSecurity Constructor
 
-**Constructor Options:**
-- `policyPath`: Path to policy JSON file
-- `policyJson`: Policy as JSON string (alternative to path)
-- `onApprovalRequired`: Async callback for approval decisions
-- `onDeny`: Callback when action is denied
-- `onAllow`: Callback when action is allowed
-- `onAuditEvent`: Callback for all audit events
-- `defaultEnvironment`: Default environment for checks
-- `defaultOwner`: Default agent owner
+| Option | Type | Description |
+|---|---|---|
+| `policyPath` | `string` | Path to policy JSON file |
+| `policyJson` | `string` | Policy as JSON string |
+| `policyBundle` | `PolicyBundle` | Policy object |
+| `policyLoader` | `() => Promise<PolicyBundle>` | Async loader (call `init()` after) |
+| `plugins` | `SecurityPlugin[]` | Array of plugins |
+| `approvalTimeoutMs` | `number` | Timeout for approval callbacks |
+| `onApprovalRequired` | `(req, dec) => Promise<boolean>` | Approval callback |
+| `onDeny` | `(req, dec) => void` | Denial callback |
+| `onAllow` | `(req, dec) => void` | Allow callback |
+| `onAuditEvent` | `(event) => void` | Audit callback |
+| `onError` | `(error, ctx) => void` | Error callback |
+| `defaultEnvironment` | `string` | Default environment |
+| `defaultOwner` | `string` | Default agent owner |
 
-**Methods:**
-- `checkToolCall(params)`: Check if a tool call is allowed
-- `protect(toolName, fn, options)`: Wrap a function with security
-- `getAuditLog()`: Get all audit events
-- `clearAuditLog()`: Clear audit history
-- `getPolicyBundle()`: Get current policy
-- `reloadPolicy()`: Reload policy from file/JSON
+### Methods
 
-See [API Documentation](./docs/api-reference.md) for full details.
-
-## Use Cases
-
-### Customer Support Agents
-- Block customer data deletion
-- Require approval for large refunds
-- Prevent PII leakage via email
-
-### Data Analytics Agents
-- Block bulk data exports
-- Prevent write operations (UPDATE/DELETE)
-- Require approval for PII table access
-
-### Marketing Automation Agents
-- Require approval for bulk emails
-- Block emails to external domains
-- Time-gate campaigns outside business hours
-
-### Financial Agents
-- Require approval for all payments/refunds
-- Block operations above threshold
-- Enforce dual-approval for large amounts
+| Method | Description |
+|---|---|
+| `checkToolCall(params)` | Check if a tool call is allowed |
+| `protect(toolName, fn, opts)` | Wrap a function with security |
+| `init()` | Async init (for policyLoader) |
+| `registerPlugin(plugin)` | Add a plugin at runtime |
+| `unregisterPlugin(name)` | Remove a plugin |
+| `getPlugin(name)` | Get a registered plugin |
+| `getAuditLog()` | Get all audit events |
+| `clearAuditLog()` | Clear audit history |
+| `getPolicyBundle()` | Get current policy |
+| `reloadPolicy()` | Reload from file/JSON |
+| `reloadPolicyAsync(loader?)` | Reload from async source |
+| `shutdown()` | Gracefully shut down SDK + plugins |
 
 ## Documentation
 
-- [Getting Started Guide](./docs/getting-started.md)
-- [Policy Writing Guide](./docs/policy-guide.md)
-- [API Reference](./docs/api-reference.md)
-- [Integration Examples](./docs/integrations/)
+- [Quick Start Guide](./QUICKSTART.md)
 - [Architecture](./docs/architecture.md)
+- [Schema Specification](./docs/schemas.md)
+- [Policy Guide](./docs/policies.md)
+- [Examples](./examples/)
 
 ## Contributing
 
@@ -313,11 +274,6 @@ We welcome contributions! This is an open-source project designed for the commun
 ## License
 
 MIT License - see [LICENSE](./LICENSE) for details.
-
-## Support
-
-- GitHub Issues: [Report bugs or request features](https://github.com/your-org/agent-runtime-security/issues)
-- Discussions: [Ask questions and share ideas](https://github.com/your-org/agent-runtime-security/discussions)
 
 ---
 

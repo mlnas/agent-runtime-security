@@ -3,129 +3,122 @@
 ```
 agent-runtime-security/
 │
-├── README.md                   # SDK overview and quick start
-├── QUICKSTART.md              # Detailed getting started guide
-├── IMPLEMENTATION.md          # Implementation notes
-├── PROJECT_STRUCTURE.md       # This file
-├── package.json               # Root package (demos)
-├── demo.ts                    # Full demo with all scenarios
-├── test-demo.ts               # Quick 3-scenario demo
-├── default-policy.json        # Example policy bundle
-├── .gitignore                 # Git ignore
+├── README.md                       # SDK overview and quick start
+├── QUICKSTART.md                   # Getting started guide
+├── IMPLEMENTATION.md               # Implementation details and design decisions
+├── PROJECT_STRUCTURE.md            # This file
+├── package.json                    # Root package (scripts for demos/build)
+├── tsconfig.json                   # Root TypeScript config
+├── demo.ts                         # Full demo (9 scenarios with plugins)
+├── test-demo.ts                    # Quick demo (5 scenarios)
+├── default-policy.json             # Example policy bundle
+├── .gitignore                      # Git ignore rules
 │
-├── core/                      # Core SDK package
-│   ├── package.json          # @agent-security/core
-│   ├── tsconfig.json         # TypeScript config
+├── core/                           # Core SDK package
+│   ├── package.json                # @agent-security/core
+│   ├── tsconfig.json               # TypeScript config
 │   ├── src/
-│   │   ├── schemas.ts        # TypeScript type definitions
-│   │   ├── loader.ts         # Policy bundle loader
-│   │   ├── evaluator.ts      # Policy evaluation engine
-│   │   ├── events.ts         # Audit event generator
-│   │   ├── default-policy.ts # Default policy factory
-│   │   ├── sdk.ts            # Main SDK client (NEW)
-│   │   └── index.ts          # Public exports
-│   └── dist/                 # Compiled output (generated)
+│   │   ├── index.ts                # Public exports (SDK, plugins, types)
+│   │   ├── sdk.ts                  # Main SDK client + plugin pipeline
+│   │   ├── schemas.ts              # TypeScript type definitions (v0.2)
+│   │   ├── evaluator.ts            # Policy evaluation engine (v0.2)
+│   │   ├── loader.ts               # Policy bundle loader (sync + async)
+│   │   ├── events.ts               # Audit event generator (UUID, plugin source)
+│   │   ├── default-policy.ts       # Default policy factory
+│   │   └── plugins/                # Built-in plugins
+│   │       ├── index.ts            # Plugin barrel exports
+│   │       ├── kill-switch.ts      # Emergency agent disable
+│   │       ├── rate-limiter.ts     # Per-agent/per-tool rate limiting
+│   │       ├── session-context.ts  # Cross-call session tracking
+│   │       └── output-validator.ts # Post-execution output scanning
+│   └── dist/                       # Compiled output (generated)
 │
-├── examples/                  # Integration examples (NEW)
-│   ├── README.md             # Examples overview
-│   ├── basic-usage.ts        # Simple integration
-│   ├── custom-approval.ts    # Custom approval workflow
-│   ├── protect-wrapper.ts    # Using protect() wrapper
-│   └── langchain-integration.ts # LangChain integration
+├── examples/                       # Integration examples
+│   ├── basic-usage.ts              # Simplest integration
+│   ├── custom-approval.ts          # Approval workflow with timeout
+│   ├── protect-wrapper.ts          # Function wrapping pattern
+│   └── plugins-demo.ts             # All four built-in plugins
 │
-└── docs/                      # Documentation
-    ├── architecture.md        # SDK architecture
-    ├── schemas.md            # Schema specifications
-    ├── policies.md           # Policy writing guide
-    └── build-order.md        # Development phases
+└── docs/                           # Documentation
+    ├── architecture.md             # SDK architecture + plugin pipeline
+    ├── schemas.md                  # Schema specifications (v0.2)
+    ├── policies.md                 # Policy writing guide
+    └── build-order.md              # Development phases
 ```
-
-## What Changed
-
-### Removed (Gateway-based approach)
-- ❌ `gateway/` - Separate HTTP server
-- ❌ `setup.sh` - Complex setup script
-- ❌ `docs/production-roadmap.md` - SaaS deployment docs
-- ❌ HTTP client dependencies (axios)
-- ❌ Express server code
-
-### Added (SDK-first approach)
-- ✅ `core/src/sdk.ts` - Main SDK client
-- ✅ `examples/` - Integration examples
-- ✅ Updated demos using SDK directly
-- ✅ SDK-focused documentation
 
 ## Module Structure
 
 ### Core (`/core`)
-**Purpose**: The SDK package that enterprises install
+
+**Purpose**: The SDK package that enterprises install.
 
 **Exports**:
-- `AgentSecurity` - Main SDK client class
-- `SecurityError` - Custom error for blocked actions
-- Type definitions (schemas)
+- `AgentSecurity` — Main SDK client class
+- `SecurityError` — Custom error for blocked actions
+- `killSwitch` / `KillSwitchPlugin` — Emergency stop plugin
+- `rateLimiter` / `RateLimiterPlugin` — Rate limiting plugin
+- `sessionContext` / `SessionContextPlugin` — Session tracking plugin
+- `outputValidator` / `OutputValidatorPlugin` — Output scanning plugin
+- All type definitions (schemas, plugin interfaces)
 - Policy loader and evaluator
 
 **Usage**:
 ```typescript
-import { AgentSecurity } from '@agent-security/core';
+import {
+  AgentSecurity,
+  killSwitch,
+  rateLimiter,
+  sessionContext,
+  outputValidator,
+} from '@agent-security/core';
 ```
 
 ### Examples (`/examples`)
-**Purpose**: Integration patterns and reference implementations
+
+**Purpose**: Integration patterns and reference implementations.
 
 **Contents**:
-- Basic usage example
-- Custom approval workflows
-- Function wrappers with `protect()`
-- Agent framework integration
+- Basic usage — minimal configuration
+- Custom approval workflows — Slack/email/ticketing patterns
+- Function wrappers with `protect()` — decorative security
+- Plugin usage — kill switch, rate limiter, session context, output validator
 
 ### Docs (`/docs`)
-**Purpose**: Technical documentation
+
+**Purpose**: Technical documentation.
 
 **Files**:
-- `architecture.md` - How the SDK works
-- `schemas.md` - Type specifications
-- `policies.md` - Policy writing guide
-- `build-order.md` - Development roadmap
+- `architecture.md` — SDK architecture and plugin pipeline data flow
+- `schemas.md` — Type specifications (v0.2)
+- `policies.md` — Policy writing guide
+- `build-order.md` — Development phases
 
-## Key Files
-
-### SDK Implementation
-- `core/src/sdk.ts` - Main SDK client with all features
-- `core/src/evaluator.ts` - Policy rule evaluation
-- `core/src/loader.ts` - Policy bundle loading/validation
-- `core/src/events.ts` - Audit event generation
-
-### Demos
-- `demo.ts` - Comprehensive demo (8 scenarios)
-- `test-demo.ts` - Quick demo (3 scenarios)
-- `default-policy.json` - Example policy bundle
-
-### Examples
-- `examples/basic-usage.ts` - Simplest integration
-- `examples/protect-wrapper.ts` - Function wrapping
-- `examples/custom-approval.ts` - Custom workflows
-- `examples/langchain-integration.ts` - Framework integration
-
-## Data Flow (New SDK Architecture)
+## Data Flow
 
 ```
 Your Agent Code
     ↓
 AgentSecurity.checkToolCall()
     ↓
-PolicyEvaluator.evaluate()
+Phase 1: beforeCheck plugins (kill switch, rate limiter, session context)
+    ↓ (may short-circuit with DENY)
+Phase 2: PolicyEvaluator.evaluate()
     ↓
-Decision (ALLOW/DENY/REQUIRE_APPROVAL)
+Phase 3: afterDecision plugins (modify/override)
     ↓
-Callbacks (onAllow/onDeny/onApprovalRequired)
+Decision (ALLOW / DENY / REQUIRE_APPROVAL)
     ↓
-Your Integration (Slack/Email/etc.)
+Phase 4: Callbacks (onAllow / onDeny / onApprovalRequired)
     ↓
-Return allowed=true/false
+Return { allowed, decision, events }
     ↓
 Execute or block tool
+
+[If using protect() wrapper]:
+    ↓
+Phase 5: afterExecution plugins (output validator)
+    ↓
+Return result or throw
 ```
 
 ## Build Process
@@ -138,111 +131,32 @@ npm run install:all
 npm run build
 
 # Run demos
-npm run demo           # Full demo
-npm run demo:quick     # Quick demo
+npm run demo           # Full demo (9 scenarios)
+npm run demo:quick     # Quick demo (5 scenarios)
 ```
 
-## Development Workflow
+## Key Files
 
-1. **Policy Development**
-   - Edit `default-policy.json`
-   - Test with demos
-   - Iterate on rules
+### SDK Implementation
+- `core/src/sdk.ts` — Main client with 5-phase plugin pipeline
+- `core/src/evaluator.ts` — Rule matching (arrays, globs, regex, numeric comparisons)
+- `core/src/loader.ts` — Sync + async policy loading
+- `core/src/events.ts` — UUID-based audit events with plugin attribution
+- `core/src/schemas.ts` — All type definitions including plugin interfaces
 
-2. **SDK Development**
-   - Edit `core/src/*.ts`
-   - Run `npm run build`
-   - Test with demos
+### Built-in Plugins
+- `core/src/plugins/kill-switch.ts` — Emergency agent disable
+- `core/src/plugins/rate-limiter.ts` — Sliding window rate limits
+- `core/src/plugins/session-context.ts` — Per-session tool usage tracking
+- `core/src/plugins/output-validator.ts` — Post-execution scanning
 
-3. **Integration Development**
-   - Create new examples in `examples/`
-   - Document patterns
-   - Share with community
+### Demos
+- `demo.ts` — 9 scenarios (plugins, approvals, advanced rules)
+- `test-demo.ts` — 5 scenarios (quick smoke test)
+- `default-policy.json` — Example policy bundle
 
-## What's Implemented
-
-✅ **Core SDK**
-- Policy evaluation engine
-- Rule matching and conditions
-- Three decision types
-- Audit event generation
-- SDK client with callbacks
-- Function wrapper (`protect()`)
-
-✅ **Demos**
-- Full demo with 8 scenarios
-- Quick 3-scenario demo
-- Example policy bundle
-- Audit trail display
-
-✅ **Examples**
-- Basic usage
-- Custom approvals
-- Function wrappers
-- Framework integration
-
-✅ **Documentation**
-- SDK-focused README
-- Quick start guide
-- Architecture overview
-- Integration patterns
-
-## What's NOT Included
-
-❌ **Infrastructure** (by design)
-- No HTTP gateway
-- No separate server
-- No deployment complexity
-- No authentication layer
-
-❌ **UI Components** (separate project)
-- No policy management UI
-- No approval dashboard
-- No visualization tools
-
-❌ **Advanced Features** (future)
-- Policy signing/verification
-- Distributed audit storage
-- Multi-tenant features
-- Advanced analytics
-
-## Integration Points
-
-### Where Enterprises Integrate
-
-1. **Agent Initialization**
-   ```typescript
-   const security = new AgentSecurity({...});
-   ```
-
-2. **Tool Execution**
-   ```typescript
-   await security.checkToolCall({...});
-   ```
-
-3. **Approval Workflow**
-   ```typescript
-   onApprovalRequired: async (req) => {...}
-   ```
-
-4. **Audit System**
-   ```typescript
-   onAuditEvent: (event) => {...}
-   ```
-
-## Target Deployment
-
-This SDK is designed to be:
-- **Installed**: via npm/yarn
-- **Imported**: directly into agent code
-- **Configured**: with JSON policy files
-- **Extended**: via callbacks and wrappers
-
-No infrastructure, no gateway, no deployment complexity.
-
-## Next Steps
-
-1. Publish to npm as `@agent-security/core`
-2. Create framework-specific packages
-3. Build policy management tools (separate repo)
-4. Community examples and integrations
+### Examples
+- `examples/basic-usage.ts` — Minimal integration
+- `examples/custom-approval.ts` — Approval with timeout
+- `examples/protect-wrapper.ts` — Function wrapping
+- `examples/plugins-demo.ts` — All built-in plugins

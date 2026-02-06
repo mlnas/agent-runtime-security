@@ -1,113 +1,57 @@
 # Integration Examples
 
-This directory contains practical examples showing how to integrate the Agent Runtime Security SDK into different scenarios.
+Practical examples showing how to integrate the Agent Runtime Security SDK.
 
 ## Running Examples
 
 ```bash
-# Build the SDK first
 npm run build
 
-# Run any example
 npx ts-node examples/basic-usage.ts
 npx ts-node examples/custom-approval.ts
 npx ts-node examples/protect-wrapper.ts
-npx ts-node examples/langchain-integration.ts
+npx ts-node examples/plugins-demo.ts
 ```
 
 ## Examples
 
 ### basic-usage.ts
-**What it shows:** The simplest way to integrate the SDK
-- Initialize with minimal config
-- Check a tool call
-- Handle the result
-- Access audit trail
-
-**Best for:** Getting started, understanding the basics
+Simplest integration — initialize, check a tool call, read the audit log.
 
 ### custom-approval.ts
-**What it shows:** How to implement custom approval workflows
-- Custom approval system integration
-- Callbacks for approvals and denials
-- Handling approval responses
-- Alerting on security events
-
-**Best for:** Integrating with Slack, email, ticketing systems
+Custom approval workflow with timeout support. Shows how to integrate with Slack, email, etc.
 
 ### protect-wrapper.ts
-**What it shows:** Using the `protect()` wrapper
-- Wrapping existing functions
-- Automatic security checks
-- Error handling with SecurityError
-- Multiple protected functions
+Wrap existing functions with `protect()` for automatic security checks.
 
-**Best for:** Adding security to existing codebases with minimal changes
+### plugins-demo.ts
+Demonstrates all four built-in plugins:
+- **Kill Switch** — Emergency agent disable
+- **Rate Limiter** — Per-agent, per-tool rate limits
+- **Session Context** — Track state across calls within a session
+- **Output Validator** — Scan tool results for sensitive data (SSN, credit cards, etc.)
 
-### langchain-integration.ts
-**What it shows:** Integrating with LangChain-style agent frameworks
-- Creating a SecureTool base class
-- Security checks before tool execution
-- Error handling in agent workflows
-- Framework-agnostic pattern
+## Creating Custom Plugins
 
-**Best for:** Agent framework integration (LangChain, CrewAI, etc.)
-
-## Creating Your Own Policy
-
-All examples use the `./policy.json` file in the root directory. Create your own or modify the default:
-
-```json
-{
-  "version": "0.1.0",
-  "generated_at": "2026-01-29T00:00:00.000Z",
-  "expires_at": "2027-01-29T00:00:00.000Z",
-  "rules": [
-    {
-      "id": "YOUR_RULE_ID",
-      "description": "What this rule does",
-      "match": {
-        "tool_name": "your_tool_name",
-        "environment": "prod"
-      },
-      "outcome": "DENY"
-    }
-  ],
-  "defaults": {
-    "outcome": "ALLOW"
-  }
-}
-```
-
-## Common Patterns
-
-### Pattern 1: Check then Execute
 ```typescript
-const result = await security.checkToolCall({...});
-if (result.allowed) {
-  await executeTool();
-}
+import { SecurityPlugin, BeforeCheckContext, PluginResult } from '../core/src';
+
+const myPlugin: SecurityPlugin = {
+  name: 'my-custom-plugin',
+  version: '1.0.0',
+
+  async beforeCheck(ctx: BeforeCheckContext): Promise<PluginResult | void> {
+    // Your logic here
+    // Return { decision: ... } to short-circuit
+    // Return void to continue
+  },
+
+  async afterDecision(ctx) {
+    // Modify decisions, add constraints, etc.
+  },
+
+  async afterExecution(ctx) {
+    // Validate output, enrich audit, etc.
+  },
+};
 ```
-
-### Pattern 2: Wrap with protect()
-```typescript
-const safeTool = security.protect('tool_name', unsafeTool);
-await safeTool(); // Auto-checked
-```
-
-### Pattern 3: Framework Integration
-```typescript
-class MySecureTool extends BaseTool {
-  async call(input: string) {
-    const result = await security.checkToolCall({...});
-    if (!result.allowed) throw new SecurityError();
-    return await this.execute(input);
-  }
-}
-```
-
-## Next Steps
-
-- Read the [API Reference](../docs/api-reference.md)
-- Check out the [Policy Guide](../docs/policy-guide.md)
-- Run the full demo: `npm run demo`

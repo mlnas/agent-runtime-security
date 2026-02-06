@@ -1,290 +1,286 @@
 #!/usr/bin/env ts-node
 
-import { AgentSecurity } from "./core/src/sdk";
+import {
+  AgentSecurity,
+  killSwitch,
+  rateLimiter,
+  sessionContext,
+} from "./core/src";
+import type { KillSwitchPlugin } from "./core/src/plugins/kill-switch";
+import type { RateLimiterPlugin } from "./core/src/plugins/rate-limiter";
+import type { SessionContextPlugin } from "./core/src/plugins/session-context";
 import { AgentActionRequest, Decision } from "./core/src/schemas";
 
 /**
- * Agent Runtime Security SDK - Demo
- * 
- * This demo shows how to integrate the security SDK directly into your agent code.
- * No HTTP gateway required!
+ * Agent Runtime Security SDK — Full Demo
+ *
+ * Showcases:
+ *   1. Plugin architecture (kill switch, rate limiter, session context)
+ *   2. Policy evaluation (ALLOW / DENY / REQUIRE_APPROVAL)
+ *   3. Approval workflow with timeouts
+ *   4. Audit trail
+ *   5. protect() wrapper
  */
 
-// Track approval requests for demo purposes
+// Track approval requests for simulation
 const pendingApprovals: Array<{
   request: AgentActionRequest;
   decision: Decision;
   resolve: (approved: boolean) => void;
 }> = [];
 
-// Initialize the security SDK
+// ----- Initialize plugins -----
+
+const ks = killSwitch();
+const rl = rateLimiter({ maxPerMinute: 5, maxPerMinutePerTool: 3 });
+const sc = sessionContext({
+  limits: { trigger_payment: { maxPerSession: 2 } },
+  sessionTtlMs: 600_000,
+});
+
+// ----- Initialize SDK -----
+
 const security = new AgentSecurity({
   policyPath: "./default-policy.json",
   defaultEnvironment: "dev",
   defaultOwner: "demo@example.com",
-  
-  // Custom approval handler - in real use, this would integrate with Slack, email, etc.
+  approvalTimeoutMs: 10_000, // 10 seconds
+
+  plugins: [ks, rl, sc],
+
   onApprovalRequired: async (request, decision) => {
-    console.log("\n⏳ APPROVAL REQUIRED");
-    console.log(`  Tool: ${request.action.tool_name}`);
-    console.log(`  Agent: ${request.agent.agent_id} (${request.agent.environment})`);
-    console.log(`  Reason: ${decision.reasons[0]?.message}`);
-    console.log(`  Approver Role: ${decision.approver_role || "any"}`);
-    
-    // Store for later processing
+    console.log("\n  ⏳ APPROVAL REQUIRED");
+    console.log(`     Tool: ${request.action.tool_name}`);
+    console.log(`     Agent: ${request.agent.agent_id} (${request.agent.environment})`);
+    console.log(`     Approver: ${decision.approver_role || "any"}`);
     return new Promise<boolean>((resolve) => {
       pendingApprovals.push({ request, decision, resolve });
     });
   },
-  
+
   onDeny: (request, decision) => {
-    console.log("\n❌ DENIED");
-    console.log(`  Tool: ${request.action.tool_name}`);
-    console.log(`  Agent: ${request.agent.agent_id}`);
-    console.log(`  Reason: ${decision.reasons[0]?.message}`);
+    console.log("\n  ❌ DENIED");
+    console.log(`     Tool: ${request.action.tool_name}`);
+    console.log(`     Reason: ${decision.reasons[0]?.message}`);
   },
-  
+
   onAllow: (request, decision) => {
-    console.log("\n✅ ALLOWED");
-    console.log(`  Tool: ${request.action.tool_name}`);
-    console.log(`  Agent: ${request.agent.agent_id}`);
-    console.log(`  Reason: ${decision.reasons[0]?.message}`);
+    console.log("\n  ✅ ALLOWED");
+    console.log(`     Tool: ${request.action.tool_name}`);
+    console.log(`     Reason: ${decision.reasons[0]?.message}`);
   },
-  
+
   onAuditEvent: (event) => {
-    // In production, you'd send this to your audit log storage
-    console.log(`  📝 Event logged: ${event.event_id} (${event.outcome})`);
+    const src = event.plugin_source ? ` [${event.plugin_source}]` : "";
+    console.log(`  📝 Event: ${event.outcome}${src}`);
   },
 });
 
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// ----- Helpers -----
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
+
+function header(title: string): void {
+  console.log("\n" + "=".repeat(60));
+  console.log(`  ${title}`);
+  console.log("=".repeat(60));
+}
+
+// ----- Demo scenarios -----
 
 async function runDemo() {
   console.log(`
 ╔════════════════════════════════════════════════════════════╗
-║     Agent Runtime Security SDK - Demo                      ║
-║     (No gateway required - direct SDK integration)         ║
+║     Agent Runtime Security SDK v0.2 — Full Demo            ║
+║     Plugin Architecture + Policy Engine                    ║
 ╚════════════════════════════════════════════════════════════╝
 `);
 
-  await sleep(1000);
-
-  // Test 1: ALLOW - Safe action in dev environment
-  console.log("\n" + "=".repeat(60));
-  console.log("Test 1: Safe Dev Action (should ALLOW)");
-  console.log("=".repeat(60));
-  
-  const result1 = await security.checkToolCall({
+  // ---- 1. ALLOW - Safe dev action ----
+  header("1. Safe Dev Action (ALLOW)");
+  await security.checkToolCall({
     toolName: "query_database",
     toolArgs: { query: "SELECT name FROM users LIMIT 10" },
     agentId: "agent-001",
-    agentName: "TestAgent",
     environment: "dev",
   });
-  
-  if (result1.allowed) {
-    console.log("  ➜ Tool execution would proceed here");
-  }
 
-  await sleep(500);
+  await sleep(300);
 
-  // Test 2: DENY - Bulk export attempt
-  console.log("\n" + "=".repeat(60));
-  console.log("Test 2: Bulk Export Attempt (should DENY)");
-  console.log("=".repeat(60));
-  
-  const result2 = await security.checkToolCall({
+  // ---- 2. DENY - Bulk export blocked by policy ----
+  header("2. Bulk Export (DENY — policy rule)");
+  await security.checkToolCall({
     toolName: "query_customer_db",
     toolArgs: { query: "SELECT * FROM customers" },
     agentId: "agent-002",
-    agentName: "MaliciousAgent",
     environment: "prod",
     userInput: "Export all customers to CSV",
   });
-  
-  if (!result2.allowed) {
-    console.log("  ➜ Tool execution blocked");
-  }
 
-  await sleep(500);
+  await sleep(300);
 
-  // Test 3: DENY - PCI data via email
-  console.log("\n" + "=".repeat(60));
-  console.log("Test 3: PCI Data Email (should DENY)");
-  console.log("=".repeat(60));
-  
-  const result3 = await security.checkToolCall({
+  // ---- 3. DENY - PCI data email ----
+  header("3. PCI Data Email (DENY — data label match)");
+  await security.checkToolCall({
     toolName: "send_email",
-    toolArgs: {
-      to: "external@company.com",
-      subject: "Customer credit card details",
-      body: "Here are the credit card numbers...",
-    },
+    toolArgs: { to: "external@co.com", subject: "CC details" },
     agentId: "agent-003",
-    agentName: "EmailAgent",
     environment: "prod",
     dataLabels: ["PCI"],
   });
-  
-  if (!result3.allowed) {
-    console.log("  ➜ Tool execution blocked");
-  }
 
-  await sleep(500);
+  await sleep(300);
 
-  // Test 4: REQUIRE_APPROVAL - Payment in prod (will be in pending queue)
-  console.log("\n" + "=".repeat(60));
-  console.log("Test 4: Payment in Production (should require APPROVAL)");
-  console.log("=".repeat(60));
-  
-  const result4Promise = security.checkToolCall({
-    toolName: "trigger_payment",
-    toolArgs: {
-      amount: 1000,
-      currency: "USD",
-      recipient: "vendor@example.com",
-    },
-    agentId: "agent-004",
-    agentName: "PaymentAgent",
-    environment: "prod",
+  // ---- 4. KILL SWITCH ----
+  header("4. Kill Switch (emergency agent disable)");
+  console.log("\n  Killing agent-rogue...");
+  ks.kill("agent-rogue", "Suspicious bulk export pattern detected");
+  console.log(`  Is killed? ${ks.isKilled("agent-rogue")}`);
+
+  const ksResult = await security.checkToolCall({
+    toolName: "query_database",
+    toolArgs: { query: "SELECT 1" },
+    agentId: "agent-rogue",
+    environment: "dev",
   });
+  console.log(`  Allowed: ${ksResult.allowed}`);
 
-  await sleep(500);
+  console.log("\n  Reviving agent-rogue...");
+  ks.revive("agent-rogue");
+  console.log(`  Is killed? ${ks.isKilled("agent-rogue")}`);
 
-  // Test 5: REQUIRE_APPROVAL - Email in prod (will be in pending queue)
-  console.log("\n" + "=".repeat(60));
-  console.log("Test 5: Email in Production (should require APPROVAL)");
-  console.log("=".repeat(60));
-  
-  const result5Promise = security.checkToolCall({
-    toolName: "send_email",
-    toolArgs: {
-      to: "customer@example.com",
-      subject: "Account update",
-      body: "Your account has been updated.",
-    },
-    agentId: "agent-005",
-    agentName: "NotificationAgent",
-    environment: "prod",
-  });
+  await sleep(300);
 
-  await sleep(1000);
-
-  // Process pending approvals
-  console.log("\n" + "=".repeat(60));
-  console.log(`Pending Approvals: ${pendingApprovals.length}`);
-  console.log("=".repeat(60));
-  
-  if (pendingApprovals.length > 0) {
-    pendingApprovals.forEach((approval, index) => {
-      console.log(`\n${index + 1}. ${approval.request.action.tool_name}`);
-      console.log(`   Agent: ${approval.request.agent.agent_id}`);
-      console.log(`   Environment: ${approval.request.agent.environment}`);
-      console.log(`   Approver: ${approval.decision.approver_role || "any"}`);
+  // ---- 5. RATE LIMITER ----
+  header("5. Rate Limiter (max 3/min per tool)");
+  for (let i = 1; i <= 4; i++) {
+    const result = await security.checkToolCall({
+      toolName: "query_database",
+      toolArgs: { query: `SELECT ${i}` },
+      agentId: "agent-fast",
+      environment: "dev",
     });
+    console.log(`  Call ${i}: ${result.allowed ? "✅ allowed" : "❌ rate-limited"}`);
+  }
+  rl.resetAgent("agent-fast");
+
+  await sleep(300);
+
+  // ---- 6. SESSION CONTEXT ----
+  header("6. Session Context (max 2 payments per session)");
+  for (let i = 1; i <= 3; i++) {
+    const result = await security.checkToolCall({
+      toolName: "trigger_payment",
+      toolArgs: { amount: 100 * i, currency: "USD" },
+      agentId: "agent-pay",
+      environment: "dev",
+      sessionId: "session-abc",
+    });
+    console.log(`  Payment ${i}: ${result.allowed ? "✅ allowed" : "❌ session limit"}`);
   }
 
-  await sleep(500);
+  await sleep(300);
 
-  // Simulate approval workflow
-  console.log("\n" + "=".repeat(60));
-  console.log("Simulating Approval Workflow");
-  console.log("=".repeat(60));
-
+  // ---- 7. REQUIRE_APPROVAL with approval ----
+  header("7. Payment Approval (approve)");
+  const approvalPromise = security.checkToolCall({
+    toolName: "trigger_payment",
+    toolArgs: { amount: 5000, currency: "USD", recipient: "vendor@co.com" },
+    agentId: "agent-finance",
+    environment: "prod",
+  });
+  await sleep(200);
   if (pendingApprovals.length > 0) {
-    // Approve the payment (first approval)
-    console.log("\n✓ Approving payment request...");
-    pendingApprovals[0].resolve(true);
-    const result4 = await result4Promise;
-    if (result4.allowed) {
-      console.log("  ➜ Payment would be executed now");
-    }
-
-    await sleep(500);
-
-    // Reject the email (second approval)
-    if (pendingApprovals.length > 1) {
-      console.log("\n✗ Rejecting email request...");
-      pendingApprovals[1].resolve(false);
-      const result5 = await result5Promise;
-      if (!result5.allowed) {
-        console.log("  ➜ Email sending blocked");
-      }
-    }
+    console.log("\n  Manager approving...");
+    pendingApprovals[pendingApprovals.length - 1].resolve(true);
   }
+  const approved = await approvalPromise;
+  console.log(`  Allowed: ${approved.allowed}`);
 
-  await sleep(500);
+  await sleep(300);
 
-  // Show audit log summary
-  console.log("\n" + "=".repeat(60));
-  console.log("Audit Log Summary");
-  console.log("=".repeat(60));
-  
-  const auditLog = security.getAuditLog();
-  console.log(`\nTotal events: ${auditLog.length}`);
-  
-  const outcomes = auditLog.reduce((acc, event) => {
-    acc[event.outcome] = (acc[event.outcome] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-  
-  console.log("\nBy outcome:");
-  Object.entries(outcomes).forEach(([outcome, count]) => {
-    console.log(`  ${outcome}: ${count}`);
+  // ---- 8. REQUIRE_APPROVAL with rejection ----
+  header("8. Email Rejection (reject)");
+  const rejectPromise = security.checkToolCall({
+    toolName: "send_email",
+    toolArgs: { to: "all@company.com", subject: "Announcement" },
+    agentId: "agent-email",
+    environment: "prod",
   });
-  
-  console.log("\nAll events:");
-  auditLog.forEach((event, i) => {
-    console.log(`  ${i + 1}. [${event.outcome}] ${event.tool_name} (${event.agent_id})`);
-  });
+  await sleep(200);
+  if (pendingApprovals.length > 0) {
+    console.log("\n  Manager rejecting...");
+    pendingApprovals[pendingApprovals.length - 1].resolve(false);
+  }
+  const rejected = await rejectPromise;
+  console.log(`  Allowed: ${rejected.allowed}`);
 
-  // Demonstrate the protect() wrapper
-  console.log("\n" + "=".repeat(60));
-  console.log("Bonus: Using protect() wrapper");
-  console.log("=".repeat(60));
+  await sleep(300);
 
-  // Mock email function
+  // ---- 9. protect() wrapper ----
+  header("9. protect() Wrapper");
+
   const mockSendEmail = async (to: string, subject: string, body: string) => {
     return { success: true, messageId: "mock-123" };
   };
 
-  // Wrap it with security
-  const protectedSendEmail = security.protect(
-    "send_email",
-    mockSendEmail,
-    {
-      agentId: "protected-agent",
-      environment: "dev",
-      extractToolArgs: (to, subject, body) => ({ to, subject, body }),
-    }
-  );
+  const safeSendEmail = security.protect("send_email", mockSendEmail, {
+    agentId: "wrapper-agent",
+    environment: "dev",
+    extractToolArgs: (to, subject, body) => ({ to, subject, body }),
+  });
 
   try {
-    console.log("\nCalling protected function in dev environment...");
-    const emailResult = await protectedSendEmail(
-      "user@example.com",
-      "Test",
-      "Hello world"
-    );
-    console.log("✅ Email sent:", emailResult);
-  } catch (error: any) {
-    console.log("❌ Email blocked:", error.message);
+    const emailResult = await safeSendEmail("user@example.com", "Test", "Hello");
+    console.log("  ✅ Email sent:", emailResult);
+  } catch (err: any) {
+    console.log("  ❌ Blocked:", err.message);
   }
 
+  await sleep(300);
+
+  // ---- Audit trail ----
+  header("Audit Log Summary");
+  const log = security.getAuditLog();
+  console.log(`\n  Total events: ${log.length}`);
+
+  const outcomes: Record<string, number> = {};
+  for (const e of log) {
+    outcomes[e.outcome] = (outcomes[e.outcome] || 0) + 1;
+  }
+  console.log("\n  By outcome:");
+  for (const [o, c] of Object.entries(outcomes)) {
+    console.log(`    ${o}: ${c}`);
+  }
+
+  const pluginEvents = log.filter((e) => e.plugin_source);
+  if (pluginEvents.length > 0) {
+    console.log("\n  Plugin-generated events:");
+    for (const e of pluginEvents) {
+      console.log(`    [${e.plugin_source}] ${e.outcome}: ${e.tool_name} (${e.agent_id})`);
+    }
+  }
+
+  // ---- Done ----
   console.log("\n" + "=".repeat(60));
-  console.log("Demo completed! ✅");
+  console.log("  Demo completed! ✅");
   console.log("=".repeat(60));
-  console.log("\nKey Takeaways:");
-  console.log("  • No HTTP gateway needed - SDK runs in-process");
-  console.log("  • Custom approval callbacks for your workflow");
-  console.log("  • Full audit trail captured");
-  console.log("  • Easy to integrate with decorators/wrappers");
-  console.log("  • Zero infrastructure to manage\n");
+  console.log("\n  Features demonstrated:");
+  console.log("    • Plugin pipeline (kill switch, rate limiter, session context)");
+  console.log("    • Policy evaluation (ALLOW / DENY / REQUIRE_APPROVAL)");
+  console.log("    • Approval workflow with timeout support");
+  console.log("    • Custom environments and action types");
+  console.log("    • Regex, numeric, and list-based rule matching");
+  console.log("    • Full audit trail with plugin attribution");
+  console.log("    • protect() function wrapper");
+  console.log("    • Zero infrastructure — everything runs in-process\n");
+
+  await security.shutdown();
 }
 
-runDemo().catch((error) => {
-  console.error("Demo failed:", error);
+runDemo().catch((err) => {
+  console.error("Demo failed:", err);
   process.exit(1);
 });

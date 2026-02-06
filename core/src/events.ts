@@ -1,23 +1,21 @@
+import { v4 as uuidv4 } from "uuid";
 import { AgentActionRequest, Decision, Event, EventOutcome } from "./schemas";
 
 /**
- * Generate a simple UUID for demo purposes
- * Not cryptographically secure, suitable for demo only
- */
-function generateEventId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2);
-}
-
-/**
- * Create an Event from an AgentActionRequest and Decision
- * Redacts sensitive data and includes only safe payload information
+ * Create an Event from an AgentActionRequest and Decision.
+ * Redacts sensitive data and includes only safe payload information.
+ *
+ * @param request The original agent action request
+ * @param decision The policy decision
+ * @param pluginSource Optional name of the plugin that generated this event
  */
 export function createEvent(
   request: AgentActionRequest,
-  decision: Decision
+  decision: Decision,
+  pluginSource?: string
 ): Event {
   return {
-    event_id: generateEventId(),
+    event_id: uuidv4(),
     timestamp: new Date().toISOString(),
     request_id: request.request_id,
     agent_id: request.agent.agent_id,
@@ -30,5 +28,6 @@ export function createEvent(
       environment: request.agent.environment,
       outcome: decision.outcome,
     },
+    ...(pluginSource ? { plugin_source: pluginSource } : {}),
   };
 }

@@ -2,132 +2,116 @@
 
 ## Overview
 
-This is an **open-source SDK** that enterprises can integrate directly into their AI agent systems. No gateway, no infrastructure, just `npm install` and integrate.
+Open-source SDK providing runtime security policies for AI agents. Ships with a plugin architecture for extensibility and a set of built-in plugins for common enterprise needs. No gateway, no infrastructure — just `npm install` and integrate.
 
 ## What Was Built
 
 ### Core SDK (`/core`)
 
-**Purpose**: Lightweight, in-process security layer
+**Purpose**: Lightweight, in-process security layer with plugin pipeline.
 
 **Key Components**:
 
-1. **schemas.ts** - Type definitions matching canonical spec
-   - `AgentActionRequest` - Tool call request structure
-   - `Decision` - Policy evaluation result
-   - `Event` - Audit log entry
-   - `PolicyBundle` - Policy configuration
-   - `PolicyRule` - Individual policy rules
+1. **schemas.ts** — Type definitions (v0.2)
+   - `AgentActionRequest` — Flexible action types and environments (any string)
+   - `Decision` — Policy evaluation result with optional constraints
+   - `Event` — Audit log entry with plugin attribution (`plugin_source`)
+   - `PolicyBundle` / `PolicyRule` — Policy configuration with advanced matching
+   - `SecurityPlugin` — Plugin interface with lifecycle hooks
+   - `BeforeCheckContext`, `AfterDecisionContext`, `AfterExecutionContext` — Plugin context types
 
-2. **loader.ts** - Policy bundle loading and validation
-   - Load from file path or JSON string
-   - Validate structure and expiration
-   - Type-safe parsing
+2. **loader.ts** — Policy bundle loading and validation
+   - Load from file path, JSON string, or object
+   - `loadAsync()` — Async loading from custom loader functions
+   - Validates structure, version, and expiration
+   - Public `validate()` method
 
-3. **evaluator.ts** - Policy evaluation engine
+3. **evaluator.ts** — Policy evaluation engine (v0.2)
    - First-match rule processing
-   - Environment and tool name matching
-   - Keyword and data label conditions
-   - Default fallback policy
+   - Tool name matching: exact string, arrays, glob prefixes (`query_*`)
+   - Environment matching: any string or wildcard
+   - `when` conditions: `contains_any`, `not_contains`, `matches_regex`, `data_labels_any`, `tool_args_match`
+   - Numeric comparisons: `gt`, `gte`, `lt`, `lte`, `eq`, `neq`
+   - Constraints passthrough to decisions
 
-4. **events.ts** - Audit event generation
-   - Create events from requests and decisions
-   - Redact sensitive data
-   - Generate unique event IDs
+4. **events.ts** — Audit event generation
+   - UUID-based event IDs (`uuidv4`)
+   - Plugin source attribution
+   - Data redaction
 
-5. **sdk.ts** - Main SDK client (NEW)
-   - `AgentSecurity` class - Primary API
-   - `checkToolCall()` - Policy check method
-   - `protect()` - Function wrapper
-   - Callback system for approvals/denials
-   - In-memory audit log
-   - Policy reloading
+5. **sdk.ts** — Main SDK client with plugin pipeline
+   - `AgentSecurity` class — Primary API
+   - 5-phase lifecycle: beforeCheck → evaluate → afterDecision → callbacks → afterExecution
+   - `checkToolCall()` — Policy check method
+   - `protect()` — Function wrapper with output validation
+   - `init()` — Async initialization for remote policy loading
+   - `registerPlugin()` / `unregisterPlugin()` / `getPlugin()` — Runtime plugin management
+   - `approvalTimeoutMs` — Configurable approval timeout
+   - `onError` — Error callback for plugin/callback failures
+   - `shutdown()` — Graceful cleanup calling `destroy()` on all plugins
+
+### Built-in Plugins (`/core/src/plugins`)
+
+6. **kill-switch.ts** — Emergency agent disable
+   - `kill(agentId, reason?)` — Disable a specific agent
+   - `revive(agentId)` — Re-enable a specific agent
+   - `killAll(reason?)` / `reviveAll()` — Global toggle
+   - `isKilled(agentId)` — Query status
+   - Short-circuits in `beforeCheck` with DENY
+
+7. **rate-limiter.ts** — Per-agent, per-tool rate limiting
+   - `maxPerMinute` — Global per-agent limit
+   - `maxPerMinutePerTool` — Per-tool limit
+   - Sliding window implementation
+   - Short-circuits in `beforeCheck` with DENY
+
+8. **session-context.ts** — Cross-call session tracking
+   - Per-tool `maxPerSession` limits
+   - Configurable session TTL (`sessionTtlMs`)
+   - Automatic session cleanup
+   - Session ID from `request.context.session_id`
+
+9. **output-validator.ts** — Post-execution output scanning
+   - Regex-based sensitive data detection
+   - Forbidden keyword scanning
+   - Max output length enforcement
+   - Callback on detection (`onSensitiveData`)
 
 ### Demos
 
-**demo.ts** - Comprehensive demonstration
-- 8 test scenarios
-- All three decision types
-- Approval workflow simulation
-- Audit trail display
-- Uses SDK directly (no HTTP)
+**demo.ts** — 9 scenarios demonstrating:
+- Policy decisions (ALLOW, DENY, REQUIRE_APPROVAL)
+- Kill switch block
+- Rate limiter block
+- Session context limits
+- Advanced rule matching (regex, numeric, multi-tool)
+- Approval timeout
+- Audit trail with plugin attribution
 
-**test-demo.ts** - Quick 3-scenario demo
-- Simple, fast demonstration
-- ALLOW, DENY, REQUIRE_APPROVAL
-- Clean output for presentations
+**test-demo.ts** — 5 scenarios for quick verification:
+- ALLOW, DENY, kill switch, rate limiter, REQUIRE_APPROVAL
 
-### Integration Examples (`/examples`)
+### Examples (`/examples`)
 
-**basic-usage.ts** - Simplest integration
-- Minimal configuration
-- Direct tool call checks
-- Result handling
-
-**custom-approval.ts** - Approval workflows
-- Custom approval system integration
-- Slack/email/ticketing patterns
-- Callback implementation
-
-**protect-wrapper.ts** - Function wrapping
-- Decorative security
-- Minimal code changes
-- Error handling
-
-**langchain-integration.ts** - Framework integration
-- SecureTool base class pattern
-- Agent framework compatibility
-- Reusable pattern
+- **basic-usage.ts** — Minimal integration
+- **custom-approval.ts** — Approval workflow with timeout
+- **protect-wrapper.ts** — Function wrapping pattern
+- **plugins-demo.ts** — All four built-in plugins
 
 ### Default Policy Bundle
 
 `default-policy.json` implements:
 
-1. **Data Protection**
-   - Block bulk exports (DENY)
-   - Block PCI/PII transmission (DENY)
-
-2. **Financial Controls**
-   - Require approval for payments (REQUIRE_APPROVAL)
-   - Require approval for refunds (REQUIRE_APPROVAL)
-
-3. **Production Safety**
-   - Require approval for prod emails (REQUIRE_APPROVAL)
-   - Allow all dev/staging actions (ALLOW)
-
-4. **Default Behavior**
-   - Default to ALLOW for unmatched rules
-
-## Adherence to Requirements
-
-### ✅ Core Functionality
-
-- **Policy Evaluation**: First-match rule processing ✓
-- **Three Decisions**: ALLOW, DENY, REQUIRE_APPROVAL ✓
-- **Audit Trail**: Every decision logged ✓
-- **Environment Aware**: dev/staging/prod matching ✓
-- **Conditional Rules**: Keyword and label matching ✓
-
-### ✅ SDK Design
-
-- **Zero Infrastructure**: In-process execution ✓
-- **Simple Integration**: Import and use ✓
-- **Framework Agnostic**: Works with any agent ✓
-- **TypeScript Native**: Full type safety ✓
-- **Extensible**: Callbacks for custom logic ✓
-
-### ✅ Enterprise Features
-
-- **Policy as Code**: JSON files in Git ✓
-- **Custom Approvals**: Callback integration ✓
-- **Audit Logging**: Event capture and export ✓
-- **Production Ready**: Used directly in agent code ✓
+1. **Data Protection** — Block bulk exports, block PCI/PII transmission
+2. **Financial Controls** — Require approval for payments and refunds
+3. **Production Safety** — Require approval for prod emails, allow dev/staging
+4. **Default Behavior** — ALLOW for unmatched rules
 
 ## Design Decisions
 
 ### 1. SDK Over Gateway
 
-**Decision**: In-process SDK, not separate HTTP service
+**Decision**: In-process SDK, not separate HTTP service.
 
 **Rationale**:
 - Lower latency (no network calls)
@@ -136,132 +120,70 @@ This is an **open-source SDK** that enterprises can integrate directly into thei
 - Enterprise-friendly (runs in their code)
 
 **Trade-offs**:
-- No centralized enforcement point
+- No centralized enforcement point (mitigated by remote policy loading)
 - Each agent needs SDK integration
-- Policy updates require redeployment
+- Policy updates require reload (mitigated by `reloadPolicyAsync`)
 
-### 2. Callback-Based Approvals
+### 2. Plugin Architecture
 
-**Decision**: Custom callbacks instead of built-in approval system
-
-**Rationale**:
-- Enterprises have existing approval systems
-- Flexibility for Slack, email, ticketing, etc.
-- No one-size-fits-all solution
-- SDK stays lightweight
-
-**Implementation**:
-```typescript
-onApprovalRequired: async (request, decision) => {
-  return await yourApprovalSystem(request);
-}
-```
-
-### 3. In-Memory Audit Log
-
-**Decision**: Store events in memory, provide callbacks for export
+**Decision**: Lifecycle hooks instead of monolithic core.
 
 **Rationale**:
-- SDK shouldn't dictate storage
-- Enterprises have audit systems
-- Callback pattern for flexibility
-- getAuditLog() for testing/debugging
+- Core stays small and focused (policy evaluation only)
+- Features like kill switch and rate limiter are opt-in
+- Third parties can write custom plugins
+- Each plugin has a single responsibility
 
-**Implementation**:
-```typescript
-onAuditEvent: (event) => {
-  yourAuditSystem.send(event);
-}
-```
+**Implementation**: 5-phase pipeline where plugins can short-circuit, modify decisions, or validate output.
 
-### 4. Synchronous Evaluation
+### 3. Callback-Based Approvals with Timeouts
 
-**Decision**: Evaluation is synchronous, but SDK methods are async
+**Decision**: Custom callbacks with configurable timeout.
 
 **Rationale**:
-- Rule matching is fast (microseconds)
-- Async for approval callbacks
-- No database or network in core
-- Deterministic behavior
+- Enterprises have existing approval systems (Slack, ServiceNow, etc.)
+- SDK shouldn't dictate approval UX
+- Timeout prevents hangs from unresponsive callbacks
+
+### 4. Flexible Schemas (v0.2)
+
+**Decision**: Use `string` instead of enum for environments and action types.
+
+**Rationale**:
+- Enterprises have custom environments (sandbox, preview, local, etc.)
+- Action types extend beyond tool calls (memory_access, web_browse, code_execute)
+- Extensible context with `[key: string]: any`
+- No schema changes needed for new use cases
 
 ### 5. First-Match Rule Processing
 
-**Decision**: Rules evaluated in order, first match wins
+**Decision**: Rules evaluated in order, first match wins.
 
 **Rationale**:
 - Predictable behavior
-- Easy to reason about
-- Clear precedence
 - Standard firewall pattern
+- Easy to reason about precedence
+- More specific rules go first
 
-## Key Features
+### 6. In-Memory Audit Log with Plugin Attribution
 
-### 1. checkToolCall()
+**Decision**: Store events in memory with plugin source tracking, provide callbacks for export.
 
-Primary method for policy checks:
-
-```typescript
-const result = await security.checkToolCall({
-  toolName: 'send_email',
-  toolArgs: { to: 'user@example.com' },
-  agentId: 'my-agent',
-  environment: 'prod'
-});
-
-if (result.allowed) {
-  // Execute tool
-}
-```
-
-### 2. protect()
-
-Wrap functions with automatic checks:
-
-```typescript
-const safeSendEmail = security.protect(
-  'send_email',
-  unsafeSendEmail,
-  { agentId: 'agent-1', environment: 'prod' }
-);
-
-await safeSendEmail('user@example.com', 'Hello');
-```
-
-### 3. Callbacks
-
-Four extension points:
-
-- `onApprovalRequired` - Custom approval logic
-- `onDeny` - Alert/log denials
-- `onAllow` - Track allowed actions
-- `onAuditEvent` - Export audit trail
-
-### 4. Audit Trail
-
-Built-in audit logging:
-
-```typescript
-const events = security.getAuditLog();
-// Array of all decisions made
-```
-
-### 5. Policy Reloading
-
-Hot reload policies:
-
-```typescript
-security.reloadPolicy('./new-policy.json');
-```
+**Rationale**:
+- SDK shouldn't dictate storage
+- `plugin_source` field shows which plugin made each decision
+- `onAuditEvent` callback for real-time export
+- `getAuditLog()` for testing/debugging
 
 ## Testing the System
 
 ### Run Demos
 
 ```bash
-# Full demo (8 scenarios)
+# Full demo (9 scenarios with plugins)
 npm run demo
 
-# Quick demo (3 scenarios)
+# Quick demo (5 scenarios)
 npm run demo:quick
 ```
 
@@ -271,103 +193,50 @@ npm run demo:quick
 npx ts-node examples/basic-usage.ts
 npx ts-node examples/custom-approval.ts
 npx ts-node examples/protect-wrapper.ts
-npx ts-node examples/langchain-integration.ts
+npx ts-node examples/plugins-demo.ts
 ```
 
-## What's NOT Included
+## What's NOT Included (by Design)
 
-### By Design (Enterprise Integrates)
-
-- ❌ HTTP gateway/server
-- ❌ Built-in approval UI
-- ❌ Persistent audit storage
-- ❌ Authentication/authorization
-- ❌ Policy management UI
-
-### Future Enhancements
-
-- 🔜 Policy signing/verification
-- 🔜 Advanced condition matchers (regex, JSON path)
-- 🔜 Policy testing framework
-- 🔜 Framework-specific packages
-- 🔜 Policy templates library
+- HTTP gateway/server — enterprises embed the SDK directly
+- Built-in approval UI — enterprises have their own
+- Persistent audit storage — use `onAuditEvent` to export
+- Authentication/authorization — handled by the host application
+- Policy management UI — separate concern
 
 ## Integration Points
 
-Enterprises integrate at 4 points:
+Enterprises integrate at these points:
 
-1. **Initialization**: Configure SDK with policy
-2. **Tool Execution**: Call checkToolCall() or protect()
-3. **Approval Workflow**: Implement onApprovalRequired
-4. **Audit System**: Implement onAuditEvent
+1. **Initialization** — Configure SDK with policy + plugins
+2. **Tool Execution** — Call `checkToolCall()` or use `protect()`
+3. **Approval Workflow** — Implement `onApprovalRequired` callback
+4. **Audit System** — Implement `onAuditEvent` callback
+5. **Emergency Controls** — Use kill switch plugin for instant shutoff
+6. **Plugin Extension** — Write custom plugins for org-specific logic
 
 ## Production Considerations
 
 ### Security
-- Policies should be version controlled
-- Consider signing policy bundles
-- Validate policy sources
+- Version-control policies in Git
+- Use async policy loading for centralized policy management
 - Protect approval callbacks
+- Layer plugins for defense-in-depth (kill switch + rate limiter + session context)
 
 ### Performance
 - Policy evaluation: < 1ms
-- No network calls in SDK
-- In-memory rule matching
-- Async only for approvals
+- No network calls in core SDK
+- Plugins execute in-memory
+- Async only for approvals and remote policy loading
 
 ### Monitoring
-- Track blocked actions
-- Alert on unusual patterns
-- Monitor approval latency
-- Export audit events
+- Export audit events via `onAuditEvent` to your observability stack
+- Track `plugin_source` to see which plugins are triggering
+- Monitor kill switch activations
+- Alert on rate limit hits
 
 ### Deployment
-- Include policy.json with deployment
-- Set environment correctly
-- Configure callbacks for prod
-- Test policy changes in staging
-
-## Success Metrics
-
-### For Enterprises
-- ✅ < 5 minutes to integrate
-- ✅ < 1ms policy evaluation
-- ✅ Zero infrastructure to manage
-- ✅ Works with any agent framework
-- ✅ Full audit trail
-
-### For Open Source
-- ✅ Easy to understand codebase
-- ✅ Clear documentation
-- ✅ Working examples
-- ✅ Framework agnostic
-- ✅ Extensible design
-
-## Architecture Benefits
-
-**vs Gateway Approach**:
-- ⚡ Lower latency (no HTTP)
-- 🎯 Simpler deployment (just npm install)
-- 🔧 More flexible (custom callbacks)
-- 📦 Smaller footprint (one package)
-- 🚀 Faster adoption (no infra)
-
-**vs No Security**:
-- 🛡️ Policy enforcement
-- 📊 Full audit trail
-- ⏳ Approval workflows
-- 🎨 Declarative rules
-- ✅ Compliance ready
-
-## Summary
-
-This SDK provides a **lightweight, in-process security layer** that enterprises can integrate into their AI agent systems with minimal effort. It enforces runtime policies, requires approvals for sensitive operations, and maintains a complete audit trail—all without requiring any infrastructure deployment.
-
-The design prioritizes:
-- **Simplicity**: Easy to integrate and use
-- **Flexibility**: Callbacks for custom logic
-- **Performance**: In-process, no network calls
-- **Compliance**: Full audit trail
-- **Open Source**: Enterprise-friendly license
-
-Perfect for enterprises that want to add security to their agents without the complexity of deploying and managing a separate gateway service.
+- Include policy JSON with deployment or use remote loader
+- Set environment correctly (any string: dev, staging, prod, etc.)
+- Configure `approvalTimeoutMs` for production
+- Call `shutdown()` on process exit

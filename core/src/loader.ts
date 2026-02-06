@@ -2,11 +2,17 @@ import * as fs from "fs";
 import { PolicyBundle } from "./schemas";
 
 /**
- * PolicyBundleLoader - loads and validates policy bundles
+ * PolicyBundleLoader - loads and validates policy bundles from multiple sources.
+ *
+ * Supports:
+ *   - File path (sync)
+ *   - JSON string (sync)
+ *   - PolicyBundle object (sync)
+ *   - Custom async loader function
  */
 export class PolicyBundleLoader {
   /**
-   * Load a policy bundle from a file path
+   * Load a policy bundle from a file path (synchronous).
    */
   static loadFromFile(filePath: string): PolicyBundle {
     const content = fs.readFileSync(filePath, "utf-8");
@@ -16,7 +22,7 @@ export class PolicyBundleLoader {
   }
 
   /**
-   * Load a policy bundle from a JSON string
+   * Load a policy bundle from a JSON string (synchronous).
    */
   static loadFromString(json: string): PolicyBundle {
     const bundle = JSON.parse(json) as PolicyBundle;
@@ -25,9 +31,38 @@ export class PolicyBundleLoader {
   }
 
   /**
-   * Validate a policy bundle structure
+   * Load a policy bundle from a plain object (synchronous).
+   * Useful when constructing bundles programmatically.
    */
-  private static validate(bundle: PolicyBundle): void {
+  static loadFromObject(obj: PolicyBundle): PolicyBundle {
+    this.validate(obj);
+    return obj;
+  }
+
+  /**
+   * Load a policy bundle using a custom async loader function.
+   * The loader must return a PolicyBundle (or a JSON string).
+   *
+   * @example
+   * ```typescript
+   * const bundle = await PolicyBundleLoader.loadAsync(async () => {
+   *   const res = await fetch('https://policies.company.com/v1/bundle');
+   *   return res.json();
+   * });
+   * ```
+   */
+  static async loadAsync(loader: () => Promise<PolicyBundle | string>): Promise<PolicyBundle> {
+    const result = await loader();
+    const bundle = typeof result === "string" ? JSON.parse(result) as PolicyBundle : result;
+    this.validate(bundle);
+    return bundle;
+  }
+
+  /**
+   * Validate a policy bundle structure.
+   * Throws descriptive errors for invalid bundles.
+   */
+  static validate(bundle: PolicyBundle): void {
     if (!bundle.version) {
       throw new Error("PolicyBundle missing version");
     }
