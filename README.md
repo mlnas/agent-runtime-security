@@ -315,6 +315,51 @@ const secureTool = wrapLangChainTool(security, 'query_db', queryFn, { agentId: '
 
 // CrewAI
 const crewGuard = createCrewAIGuard(security, { agentId: 'crew-agent', environment: 'prod' });
+
+**Kill Switch** — Emergency agent disable:
+```typescript
+const ks = killSwitch();
+ks.kill('agent-id');    // Disable immediately
+ks.revive('agent-id');  // Re-enable
+ks.killAll();           // Nuclear option
+```
+
+**Rate Limiter** — Per-agent, per-tool rate limits:
+```typescript
+rateLimiter({ maxPerMinute: 60, maxPerMinutePerTool: 20 })
+```
+
+**Session Context** — Track state across calls:
+```typescript
+sessionContext({
+  limits: { trigger_payment: { maxPerSession: 3 } },
+  sessionTtlMs: 3600_000,
+})
+```
+
+**Output Validator** — Scan tool results for sensitive data:
+```typescript
+outputValidator({
+  sensitivePatterns: [/\b\d{3}-\d{2}-\d{4}\b/], // SSN
+  onSensitiveData: (tool, matches) => alert(tool, matches),
+})
+```
+
+### Custom Plugins
+
+```typescript
+const myPlugin: SecurityPlugin = {
+  name: 'my-plugin',
+  async beforeCheck(ctx) {
+    // Return { decision } to short-circuit, or void to continue
+  },
+  async afterDecision(ctx) {
+    // Modify or override the decision
+  },
+  async afterExecution(ctx) {
+    // Validate output, enrich audit, etc.
+  },
+};
 ```
 
 ## Advanced Policy Rules
