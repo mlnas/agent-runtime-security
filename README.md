@@ -1,3 +1,5 @@
+![Workflow](workflow.png)
+
 # Agent-SPM: Agent Security Posture Management
 
 **Open-source platform for runtime security of AI agents.**
