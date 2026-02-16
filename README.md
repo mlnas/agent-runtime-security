@@ -2,7 +2,7 @@
 
 > After ClaudeBot, how do you trust your AI agents in production?
 
-[![Build Status](https://github.com/mlnas/agent-runtime-security/workflows/CI/badge.svg)](https://github.com/mlnas/agent-runtime-security/actions)
+[![Build Status](https://github.com/mlnas/agent-runtime-security/workflows/CI/badge.svg?branch=main)](https://github.com/mlnas/agent-runtime-security/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Agent-SPM** enforces security policies on AI agent tool calls at runtime. Think of it as a **firewall for your agents** — block dangerous actions, require approvals, prevent data leaks, and generate compliance reports.
