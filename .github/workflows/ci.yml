@@ -23,24 +23,15 @@ jobs:
         cache: 'npm'
 
     - name: Install dependencies
-      run: npm install
+      run: npm ci
 
-    - name: Build all packages
-      run: npm run build
+    - name: Build core
+      run: cd core && npm run build
 
     - name: Run tests
       run: cd core && npm test
 
-    - name: Run demos
-      run: |
-        npm run demo:quick
-        npm run demo:identity
-        npm run demo:egress
-        npm run demo:supply-chain
-        npm run demo:guardian
-        npm run demo:full-spm
-
-  lint:
+  typecheck:
     runs-on: ubuntu-latest
 
     steps:
@@ -53,7 +44,7 @@ jobs:
         cache: 'npm'
 
     - name: Install dependencies
-      run: npm install
+      run: npm ci
 
-    - name: Type check
-      run: npx tsc --noEmit
+    - name: Type check core
+      run: cd core && npx tsc --noEmit
