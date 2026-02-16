@@ -1,10 +1,52 @@
 /**
- * Canonical Schemas (v0.2)
+ * Canonical Schemas (v0.3 — Agent-SPM)
  *
- * These schemas are the contract for the Agent Runtime Security SDK.
+ * These schemas are the contract for the Agent Security Posture Management SDK.
  * They define the core data structures used across policy evaluation,
- * audit logging, and plugin lifecycle.
+ * identity management, egress control, audit logging, and plugin lifecycle.
  */
+
+// ---------------------------------------------------------------------------
+// Agent Identity
+// ---------------------------------------------------------------------------
+
+export type AgentTrustLevel = 'untrusted' | 'basic' | 'verified' | 'privileged' | 'system';
+
+export type AgentType = 'ide_agent' | 'pr_agent' | 'chat_agent' | 'workflow_agent' | 'autonomous_agent' | string;
+
+export interface AgentAttestation {
+  issuer: string;
+  issued_at: string; // ISO-8601
+  expires_at?: string; // ISO-8601
+  signature?: string;
+}
+
+export interface AgentIdentity {
+  agent_id: string;
+  name: string;
+  owner: string;
+  environment: string;
+  agent_type?: AgentType;
+  trust_level?: AgentTrustLevel;
+  roles?: string[]; // e.g. 'finance.reader', 'email.sender'
+  capabilities?: string[]; // e.g. 'tool_call', 'code_execute', 'web_browse'
+  max_delegation_depth?: number;
+  attestation?: AgentAttestation;
+}
+
+// ---------------------------------------------------------------------------
+// Tool Identity
+// ---------------------------------------------------------------------------
+
+export interface ToolIdentity {
+  tool_name: string;
+  version?: string;
+  provider?: string; // 'built-in' | 'mcp' | 'langchain' | 'custom'
+  manifest_hash?: string; // SHA-256
+  permissions_required?: string[]; // e.g. 'network.outbound', 'fs.read'
+  data_access?: string[];
+  verified?: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Agent Action Request
@@ -18,11 +60,18 @@ export interface AgentActionRequest {
     name: string;
     owner: string; // email or team
     environment: string; // e.g. "dev", "staging", "prod", "sandbox", or any custom value
+    agent_type?: AgentType;
+    trust_level?: AgentTrustLevel;
+    roles?: string[];
+    capabilities?: string[];
+    max_delegation_depth?: number;
+    attestation?: AgentAttestation;
   };
   action: {
     type: string; // "tool_call", "memory_access", "web_browse", "code_execute", etc.
     tool_name: string;
     tool_args: Record<string, any>; // raw may be redacted
+    tool_identity?: ToolIdentity;
   };
   context: {
     user_input?: string; // optional; may be redacted
@@ -31,6 +80,7 @@ export interface AgentActionRequest {
     trace_id?: string; // optional
     session_id?: string; // optional; for tracking state across calls
     parent_agent_id?: string; // optional; for multi-agent hierarchies
+    delegation_chain?: string[]; // ordered list of agent IDs in the delegation path
     [key: string]: any; // extensible context
   };
 }
@@ -39,7 +89,7 @@ export interface AgentActionRequest {
 // Decision
 // ---------------------------------------------------------------------------
 
-export type DecisionOutcome = "ALLOW" | "DENY" | "REQUIRE_APPROVAL";
+export type DecisionOutcome = "ALLOW" | "DENY" | "REQUIRE_APPROVAL" | "STEP_UP" | "REQUIRE_TICKET" | "REQUIRE_HUMAN";
 
 export interface Decision {
   outcome: DecisionOutcome;
@@ -59,6 +109,9 @@ export type EventOutcome =
   | "ALLOW"
   | "DENY"
   | "REQUIRE_APPROVAL"
+  | "STEP_UP"
+  | "REQUIRE_TICKET"
+  | "REQUIRE_HUMAN"
   | "APPROVED"
   | "REJECTED"
   | "KILL_SWITCH"
@@ -90,6 +143,10 @@ export interface PolicyRule {
   match: {
     tool_name: string | string[]; // exact string, array of strings, glob pattern, or "*"
     environment: string; // any string or "*"
+    agent_type?: AgentType | AgentType[];
+    trust_level_min?: AgentTrustLevel;
+    agent_roles_any?: string[];
+    tool_provider?: string | string[];
   };
   when?: {
     contains_any?: string[]; // applies to user_input + tool_args as stringified

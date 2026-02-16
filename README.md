@@ -1,34 +1,35 @@
-# Agent Runtime Security SDK
+# Agent-SPM: Agent Security Posture Management
 
-**Open-source SDK for adding runtime security policies to AI agents.**
+**Open-source platform for runtime security of AI agents.**
 
-Protect your AI agents with declarative security policies and a plugin architecture that runs directly in your code. No gateway, no infrastructure — just `npm install` and integrate.
+Protect AI agents with declarative security policies, identity management, data loss prevention, supply chain verification, anomaly detection, and compliance reporting. Runs in-process — no gateway, no infrastructure.
 
-## Why This SDK?
+## Why Agent-SPM?
 
 AI agents can access sensitive data, make API calls, and execute actions on your behalf. Without runtime security, a prompt injection or rogue agent could:
 
 - Export your entire customer database
 - Send PII/PCI data to external systems
 - Execute unauthorized financial transactions
-- Delete production data
+- Install compromised tools or run dangerous commands
+- Escalate privileges through agent delegation chains
 
-This SDK lets you define **security policies as code** and enforce them at runtime, right where your agent executes.
+Agent-SPM gives you **security policies as code** enforced at runtime, right where your agent executes.
 
-## Key Features
+## Platform Overview
 
-- **Zero Infrastructure** — Runs in-process, no gateway or server needed
-- **Plugin Architecture** — Extensible lifecycle hooks (beforeCheck, afterDecision, afterExecution)
-- **Policy as Code** — Define rules in JSON, version control with Git
-- **Three Decision Types** — ALLOW, DENY, or REQUIRE_APPROVAL
-- **Built-in Plugins** — Kill switch, rate limiter, session context, output validator
-- **Approval Timeouts** — Configurable timeout so approvals can't hang forever
-- **Custom Environments** — Any string (dev, staging, prod, sandbox, preview, etc.)
-- **Advanced Rule Matching** — Regex, numeric comparisons, array matching, glob prefixes
-- **Async Policy Loading** — Load policies from files, URLs, vaults, or custom sources
-- **Full Audit Trail** — Every decision is logged with plugin attribution
-- **Framework Agnostic** — Works with LangChain, CrewAI, custom agents, etc.
-- **TypeScript Native** — Full type safety and IDE autocomplete
+| Package | Description |
+|---------|-------------|
+| [`@agent-security/core`](#core-policy-engine) | Policy engine, plugin pipeline, audit logging |
+| [`@agent-security/identity`](#identity--authorization) | Agent/tool registration, trust evaluation |
+| [`@agent-security/egress`](#egress-control--dlp) | Data loss prevention, egress channel control |
+| [`@agent-security/supply-chain`](#supply-chain-security) | MCP scanning, tool provenance, command governance |
+| [`@agent-security/guardian`](#guardian-agents) | Anomaly detection, auto-kill, incident response |
+| [`@agent-security/posture`](#posture-management) | Risk scoring, compliance mapping, SIEM integration |
+| [`@agent-security/containment`](#containment) | Sandbox enforcement, change control |
+| [`@agent-security/adapters`](#framework-adapters) | Cursor, Claude Code, LangChain, CrewAI |
+
+Install only what you need. All packages compose through the core plugin pipeline.
 
 ## Quick Start
 
@@ -77,17 +78,16 @@ const ks = killSwitch();
 const security = new AgentSecurity({
   policyPath: './policy.json',
   plugins: [ks, rateLimiter({ maxPerMinute: 60 })],
-  approvalTimeoutMs: 300_000, // 5 minute timeout
+  approvalTimeoutMs: 300_000,
 
   onApprovalRequired: async (request, decision) => {
-    return await askManager(request); // Slack, email, etc.
+    return await askManager(request);
   },
   onDeny: (request, decision) => {
     logger.error('Action blocked', { request, decision });
   },
 });
 
-// Before executing any tool, check the policy
 const result = await security.checkToolCall({
   toolName: 'send_email',
   toolArgs: { to: 'user@example.com' },
@@ -118,68 +118,201 @@ const sendEmail = security.protect(
   }
 );
 
-// Automatically checked before execution
 await sendEmail('user@example.com', 'Hello', 'World');
 ```
 
-## Plugin Architecture
+## Core Policy Engine
 
-The SDK uses a phased plugin pipeline inspired by middleware patterns:
+The 5-phase plugin pipeline at the heart of Agent-SPM:
 
 ```
-Phase 1: beforeCheck    → Kill switch, rate limiting, session checks
-Phase 2: evaluate       → Core policy engine (rule matching)
+Phase 1: beforeCheck    → Kill switch, rate limiting, identity, DLP, supply chain, containment
+Phase 2: evaluate       → Core policy engine (first-match rule processing)
 Phase 3: afterDecision  → Modify decisions, apply overrides
-Phase 4: callbacks      → onAllow / onDeny / onApprovalRequired
+Phase 4: callbacks      → onAllow / onDeny / onApprovalRequired / onStepUp / onTicket / onHuman
 Phase 5: afterExecution → Output validation (protect() only)
 ```
 
-### Built-in Plugins
+**Built-in plugins:**
 
-**Kill Switch** — Emergency agent disable:
+- **Kill Switch** — `ks.kill('agent-id')` / `ks.killAll()` / `ks.revive('agent-id')`
+- **Rate Limiter** — `rateLimiter({ maxPerMinute: 60, maxPerMinutePerTool: 20 })`
+- **Session Context** — Per-session tool usage tracking with configurable TTL
+- **Output Validator** — Post-execution regex scanning for sensitive data
+
+**6 decision types:** ALLOW, DENY, REQUIRE_APPROVAL, STEP_UP, REQUIRE_TICKET, REQUIRE_HUMAN
+
+## Identity & Authorization
+
+`npm install @agent-security/identity`
+
+Register agents with trust levels and enforce identity requirements:
+
 ```typescript
-const ks = killSwitch();
-ks.kill('agent-id');    // Disable immediately
-ks.revive('agent-id');  // Re-enable
-ks.killAll();           // Nuclear option
+import { AgentRegistry, TrustEvaluator, identityEnforcer } from '@agent-security/identity';
+
+const registry = new AgentRegistry();
+registry.register({
+  agent_id: 'finance-bot',
+  name: 'Finance Bot',
+  trust_level: 'privileged',
+  roles: ['finance.reader', 'finance.writer'],
+  agent_type: 'workflow_agent',
+});
+
+const plugin = identityEnforcer({
+  agentRegistry: registry,
+  trustEvaluator: new TrustEvaluator(),
+  requireRegistration: true,
+  minimumTrustLevel: 'basic',
+});
 ```
 
-**Rate Limiter** — Per-agent, per-tool rate limits:
-```typescript
-rateLimiter({ maxPerMinute: 60, maxPerMinutePerTool: 20 })
-```
+**Trust hierarchy:** untrusted → basic → verified → privileged → system
 
-**Session Context** — Track state across calls:
-```typescript
-sessionContext({
-  limits: { trigger_payment: { maxPerSession: 3 } },
-  sessionTtlMs: 3600_000,
-})
-```
+## Egress Control & DLP
 
-**Output Validator** — Scan tool results for sensitive data:
-```typescript
-outputValidator({
-  sensitivePatterns: [/\b\d{3}-\d{2}-\d{4}\b/], // SSN
-  onSensitiveData: (tool, matches) => alert(tool, matches),
-})
-```
+`npm install @agent-security/egress`
 
-### Custom Plugins
+Classify data in tool arguments and block sensitive data from leaving through unauthorized channels:
 
 ```typescript
-const myPlugin: SecurityPlugin = {
-  name: 'my-plugin',
-  async beforeCheck(ctx) {
-    // Return { decision } to short-circuit, or void to continue
+import { egressEnforcer, DEFAULT_CLASSIFIERS } from '@agent-security/egress';
+
+const egress = egressEnforcer({
+  policy: {
+    rules: [
+      { id: 'BLOCK_PII_EMAIL', description: 'No PII via email', classifications: ['PII'], channels: ['email'], action: 'block' },
+      { id: 'BLOCK_SECRETS', description: 'No secrets anywhere', classifications: ['SECRET'], action: 'block' },
+    ],
+    default_action: 'allow',
   },
-  async afterDecision(ctx) {
-    // Modify or override the decision
-  },
-  async afterExecution(ctx) {
-    // Validate output, enrich audit, etc.
-  },
-};
+  classifiers: DEFAULT_CLASSIFIERS,
+  toolChannelMappings: [
+    { tool_name: 'send_email', channel: 'email', destination_field: 'to' },
+  ],
+});
+```
+
+**Built-in classifiers:** SSN, email, phone, credit cards, API keys, AWS keys, private keys, generic secrets
+
+## Supply Chain Security
+
+`npm install @agent-security/supply-chain`
+
+Verify tool provenance, scan MCP servers, and govern shell commands:
+
+```typescript
+import { McpScanner, supplyChainGuard, ToolProvenance, CommandGovernor } from '@agent-security/supply-chain';
+
+// Scan MCP servers for risks
+const scanner = new McpScanner();
+const report = scanner.scan({ name: 'external-server', permissions: ['network.outbound'], tools: [...] });
+
+// Govern shell commands
+const governor = new CommandGovernor({
+  rules: [
+    { pattern: 'npm test', action: 'allow', reason: 'Tests are safe' },
+    { pattern: 'rm -rf *', action: 'block', reason: 'Destructive operations blocked' },
+  ],
+  default_action: 'block',
+});
+```
+
+## Guardian Agents
+
+`npm install @agent-security/guardian`
+
+Autonomous anomaly detection and incident response:
+
+```typescript
+import { GuardianAgent, BLUEPRINT_FINANCE } from '@agent-security/guardian';
+
+const guardian = new GuardianAgent({
+  ...BLUEPRINT_FINANCE,
+  auto_kill_threshold: 3,
+  onAnomaly: (incident) => alertSecurityTeam(incident),
+  onKill: (agentId, reason) => console.log(`Terminated: ${agentId}`),
+});
+
+// Feed audit events from the core SDK
+const security = new AgentSecurity({
+  policyBundle,
+  onAuditEvent: (event) => guardian.processEvent(event),
+});
+```
+
+**Anomaly types:** frequency spikes, volume spikes, suspicious sequences, off-hours activity
+
+## Posture Management
+
+`npm install @agent-security/posture`
+
+Fleet-wide risk scoring, compliance mapping, and SIEM integration:
+
+```typescript
+import { RiskScorer, ComplianceMapper, SocFormatter } from '@agent-security/posture';
+
+// Risk scoring
+const scorer = new RiskScorer();
+const fleetScore = scorer.scoreFleet(inventory.getAll());
+
+// Compliance reports
+const mapper = new ComplianceMapper();
+const report = mapper.generateReport('eu_ai_act', { hasInventory: true, hasAuditLog: true, ... });
+
+// SIEM export
+const formatter = new SocFormatter();
+const cef = formatter.toCef(auditEvent);  // Splunk, QRadar
+```
+
+**Frameworks:** EU AI Act, UK AI Governance
+
+## Containment
+
+`npm install @agent-security/containment`
+
+Sandbox enforcement and change control:
+
+```typescript
+import { SandboxManager, ChangeControl, containmentPlugin } from '@agent-security/containment';
+
+const sandbox = new SandboxManager();
+sandbox.registerSandbox('terminal', {
+  type: 'process',
+  allowed_paths: ['/tmp', '/home/app'],
+  network_enabled: false,
+  timeout_ms: 10000,
+});
+
+const changeControl = new ChangeControl({
+  provider: 'jira',
+  ticket_pattern: '^(JIRA|OPS)-\\d+$',
+  required_statuses: ['approved', 'in_progress'],
+  validateTicket: async (ticketId) => fetchTicket(ticketId),
+});
+```
+
+## Framework Adapters
+
+`npm install @agent-security/adapters`
+
+Pre-built integrations for popular AI frameworks:
+
+```typescript
+import { createCursorMiddleware, createClaudeCodeWrapper, wrapLangChainTool, createCrewAIGuard } from '@agent-security/adapters';
+
+// Cursor IDE
+const middleware = createCursorMiddleware(security, { agentId: 'cursor-agent', environment: 'dev' });
+
+// Claude Code
+const guard = createClaudeCodeWrapper(security, { agentId: 'claude-code', environment: 'dev' });
+
+// LangChain
+const secureTool = wrapLangChainTool(security, 'query_db', queryFn, { agentId: 'lc-agent' });
+
+// CrewAI
+const crewGuard = createCrewAIGuard(security, { agentId: 'crew-agent', environment: 'prod' });
 ```
 
 ## Advanced Policy Rules
@@ -204,23 +337,26 @@ const myPlugin: SecurityPlugin = {
 { "when": { "tool_args_match": { "amount": { "gt": 1000 } } } }
 ```
 
-**Negative matching:**
+**Identity-aware rules:**
 ```json
-{ "when": { "not_contains": ["safe_operation", "internal_only"] } }
+{ "match": { "tool_name": "trigger_payment", "trust_level_min": "privileged", "agent_roles_any": ["finance.writer"] } }
 ```
 
-## Run the Demo
+## Run the Demos
 
 ```bash
 git clone https://github.com/mlnas/agent-runtime-security
 cd agent-runtime-security
 
-npm run install:all
-npm run demo          # Full demo (9 scenarios)
-npm run demo:quick    # Quick demo (5 scenarios)
+npm install
+npm run demo               # Core demo (9 scenarios)
+npm run demo:quick         # Quick demo (5 scenarios)
+npm run demo:identity      # Identity & authorization
+npm run demo:egress        # DLP & egress control
+npm run demo:supply-chain  # Supply chain security
+npm run demo:guardian       # Guardian & posture management
+npm run demo:full-spm       # All packages end-to-end
 ```
-
-The demo shows: policy decisions, kill switch, rate limiter, session limits, approval workflows, and audit trail with plugin attribution.
 
 ## API Reference
 
@@ -262,10 +398,13 @@ The demo shows: policy decisions, kill switch, rate limiter, session limits, app
 ## Documentation
 
 - [Quick Start Guide](./QUICKSTART.md)
-- [Architecture](./docs/architecture.md)
-- [Schema Specification](./docs/schemas.md)
-- [Policy Guide](./docs/policies.md)
-- [Examples](./examples/)
+- [Architecture](./docs/architecture.md) — System design, pipeline, threat model
+- [Package Reference](./docs/packages.md) — Full API for all 8 packages
+- [Schema Specification](./docs/schemas.md) — Type definitions (v0.2)
+- [Policy Guide](./docs/policies.md) — Policy authoring in depth
+- [Compliance](./docs/compliance.md) — EU AI Act and UK AI Governance mapping
+- [Security](./SECURITY.md) — Security properties and hardening
+- [Examples](./examples/) — Integration demos and learning progression
 
 ## Contributing
 

@@ -1,12 +1,16 @@
 import { v4 as uuidv4 } from "uuid";
 import {
   AgentActionRequest,
+  AgentAttestation,
+  AgentTrustLevel,
+  AgentType,
   Decision,
   Event,
   SecurityPlugin,
   AfterExecutionContext,
   PluginResult,
   PolicyBundle,
+  ToolIdentity,
 } from "./schemas";
 import { PolicyBundleLoader } from "./loader";
 import { PolicyEvaluator } from "./evaluator";
@@ -43,6 +47,12 @@ export interface AgentSecurityConfig {
 
   /** Called when an action requires approval. Return true to approve. */
   onApprovalRequired?: (request: AgentActionRequest, decision: Decision) => Promise<boolean>;
+  /** Called when a step-up verification is required. Return true if verification passed. */
+  onStepUpRequired?: (request: AgentActionRequest, decision: Decision) => Promise<boolean>;
+  /** Called when a change ticket is required. Return the ticket ID if valid, or null to deny. */
+  onTicketRequired?: (request: AgentActionRequest, decision: Decision) => Promise<string | null>;
+  /** Called when hard human-in-the-loop is required. Return true to approve. */
+  onHumanRequired?: (request: AgentActionRequest, decision: Decision) => Promise<boolean>;
   /** Called when an action is denied */
   onDeny?: (request: AgentActionRequest, decision: Decision) => void;
   /** Called when an action is allowed */
@@ -79,6 +89,33 @@ export interface SecurityCheckResult {
   allowed: boolean;
   decision: Decision;
   event: Event;
+}
+
+/**
+ * Parameters for checkToolCall — includes identity-aware fields.
+ */
+export interface CheckToolCallParams {
+  toolName: string;
+  toolArgs: Record<string, any>;
+  agentId: string;
+  agentName?: string;
+  environment?: string;
+  owner?: string;
+  actionType?: string;
+  userInput?: string;
+  dataLabels?: string[];
+  riskHints?: string[];
+  sessionId?: string;
+  parentAgentId?: string;
+  // Identity-aware fields
+  agentType?: AgentType;
+  trustLevel?: AgentTrustLevel;
+  roles?: string[];
+  capabilities?: string[];
+  maxDelegationDepth?: number;
+  attestation?: AgentAttestation;
+  toolIdentity?: ToolIdentity;
+  delegationChain?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -225,20 +262,7 @@ export class AgentSecurity {
    * The pipeline is serialized via an async mutex to prevent TOCTOU races
    * in stateful plugins (rate limiter, session context).
    */
-  async checkToolCall(params: {
-    toolName: string;
-    toolArgs: Record<string, any>;
-    agentId: string;
-    agentName?: string;
-    environment?: string;
-    owner?: string;
-    actionType?: string;
-    userInput?: string;
-    dataLabels?: string[];
-    riskHints?: string[];
-    sessionId?: string;
-    parentAgentId?: string;
-  }): Promise<SecurityCheckResult> {
+  async checkToolCall(params: CheckToolCallParams): Promise<SecurityCheckResult> {
     this.ensureInitialized();
 
     // Serialize through the mutex to prevent concurrent TOCTOU races
@@ -253,20 +277,7 @@ export class AgentSecurity {
   /**
    * Internal: execute the full check pipeline (phases 1–4).
    */
-  private async executeCheckPipeline(params: {
-    toolName: string;
-    toolArgs: Record<string, any>;
-    agentId: string;
-    agentName?: string;
-    environment?: string;
-    owner?: string;
-    actionType?: string;
-    userInput?: string;
-    dataLabels?: string[];
-    riskHints?: string[];
-    sessionId?: string;
-    parentAgentId?: string;
-  }): Promise<SecurityCheckResult> {
+  private async executeCheckPipeline(params: CheckToolCallParams): Promise<SecurityCheckResult> {
     // Build request
     let request: AgentActionRequest = this.buildRequest(params);
 
@@ -322,7 +333,11 @@ export class AgentSecurity {
     // === Phase 4: Decision callbacks ===
     const allowed = await this.handleDecision(request, decision);
 
-    return { allowed, decision, event };
+    return {
+      allowed,
+      decision,
+      event,
+    };
   }
 
   // -----------------------------------------------------------------------
@@ -536,20 +551,7 @@ export class AgentSecurity {
   /**
    * Build an AgentActionRequest from check params.
    */
-  private buildRequest(params: {
-    toolName: string;
-    toolArgs: Record<string, any>;
-    agentId: string;
-    agentName?: string;
-    environment?: string;
-    owner?: string;
-    actionType?: string;
-    userInput?: string;
-    dataLabels?: string[];
-    riskHints?: string[];
-    sessionId?: string;
-    parentAgentId?: string;
-  }): AgentActionRequest {
+  private buildRequest(params: CheckToolCallParams): AgentActionRequest {
     return {
       request_id: uuidv4(),
       timestamp: new Date().toISOString(),
@@ -558,11 +560,18 @@ export class AgentSecurity {
         name: params.agentName || params.agentId,
         owner: params.owner || this.config.defaultOwner || "unknown",
         environment: params.environment || this.config.defaultEnvironment || "dev",
+        agent_type: params.agentType,
+        trust_level: params.trustLevel,
+        roles: params.roles,
+        capabilities: params.capabilities,
+        max_delegation_depth: params.maxDelegationDepth,
+        attestation: params.attestation,
       },
       action: {
         type: params.actionType || "tool_call",
         tool_name: params.toolName,
         tool_args: params.toolArgs,
+        tool_identity: params.toolIdentity,
       },
       context: {
         user_input: params.userInput,
@@ -570,6 +579,7 @@ export class AgentSecurity {
         risk_hints: params.riskHints,
         session_id: params.sessionId,
         parent_agent_id: params.parentAgentId,
+        delegation_chain: params.delegationChain,
       },
     };
   }
@@ -646,7 +656,7 @@ export class AgentSecurity {
   }
 
   /**
-   * Handle ALLOW / DENY / REQUIRE_APPROVAL decision + callbacks.
+   * Handle decision outcomes + callbacks.
    */
   private async handleDecision(
     request: AgentActionRequest,
@@ -663,6 +673,15 @@ export class AgentSecurity {
 
       case "REQUIRE_APPROVAL":
         return this.handleApproval(request, decision);
+
+      case "STEP_UP":
+        return this.handleStepUp(request, decision);
+
+      case "REQUIRE_TICKET":
+        return this.handleTicketRequired(request, decision);
+
+      case "REQUIRE_HUMAN":
+        return this.handleHumanRequired(request, decision);
 
       default:
         return false;
@@ -729,6 +748,157 @@ export class AgentSecurity {
       });
       this.recordEvent(timeoutEvent);
       this.reportError(err as Error, "onApprovalRequired");
+      return false;
+    }
+  }
+
+  /**
+   * Handle step-up verification requirement.
+   */
+  private async handleStepUp(
+    request: AgentActionRequest,
+    decision: Decision
+  ): Promise<boolean> {
+    if (!this.config.onStepUpRequired) {
+      this.safeCallback(() => this.config.onDeny?.(request, decision));
+      return false;
+    }
+
+    try {
+      const timeoutMs = this.config.approvalTimeoutMs;
+      let passed: boolean;
+
+      if (timeoutMs && timeoutMs > 0) {
+        passed = await this.raceWithTimeout(
+          this.config.onStepUpRequired(request, decision),
+          timeoutMs,
+          "Step-up verification timed out"
+        );
+      } else {
+        passed = await this.config.onStepUpRequired(request, decision);
+      }
+
+      const event = createEvent(request, {
+        ...decision,
+        outcome: passed ? "ALLOW" : "DENY",
+        reasons: [
+          ...decision.reasons,
+          {
+            code: passed ? "STEP_UP_PASSED" : "STEP_UP_FAILED",
+            message: passed ? "Step-up verification passed" : "Step-up verification failed",
+          },
+        ],
+      });
+      this.recordEvent(event);
+      return passed;
+    } catch (err) {
+      const event = createEvent(request, {
+        outcome: "DENY",
+        reasons: [...decision.reasons, { code: "STEP_UP_ERROR", message: (err as Error).message }],
+      });
+      this.recordEvent(event);
+      this.reportError(err as Error, "onStepUpRequired");
+      return false;
+    }
+  }
+
+  /**
+   * Handle ticket requirement.
+   */
+  private async handleTicketRequired(
+    request: AgentActionRequest,
+    decision: Decision
+  ): Promise<boolean> {
+    if (!this.config.onTicketRequired) {
+      this.safeCallback(() => this.config.onDeny?.(request, decision));
+      return false;
+    }
+
+    try {
+      const timeoutMs = this.config.approvalTimeoutMs;
+      let ticketId: string | null;
+
+      if (timeoutMs && timeoutMs > 0) {
+        ticketId = await this.raceWithTimeout(
+          this.config.onTicketRequired(request, decision),
+          timeoutMs,
+          "Ticket validation timed out"
+        );
+      } else {
+        ticketId = await this.config.onTicketRequired(request, decision);
+      }
+
+      const approved = ticketId !== null;
+      const event = createEvent(request, {
+        ...decision,
+        outcome: approved ? "ALLOW" : "DENY",
+        reasons: [
+          ...decision.reasons,
+          {
+            code: approved ? "TICKET_VALIDATED" : "TICKET_MISSING",
+            message: approved ? `Ticket ${ticketId} validated` : "No valid ticket provided",
+          },
+        ],
+      });
+      this.recordEvent(event);
+      return approved;
+    } catch (err) {
+      const event = createEvent(request, {
+        outcome: "DENY",
+        reasons: [...decision.reasons, { code: "TICKET_ERROR", message: (err as Error).message }],
+      });
+      this.recordEvent(event);
+      this.reportError(err as Error, "onTicketRequired");
+      return false;
+    }
+  }
+
+  /**
+   * Handle hard human-in-the-loop requirement.
+   */
+  private async handleHumanRequired(
+    request: AgentActionRequest,
+    decision: Decision
+  ): Promise<boolean> {
+    if (!this.config.onHumanRequired) {
+      this.safeCallback(() => this.config.onDeny?.(request, decision));
+      return false;
+    }
+
+    try {
+      const timeoutMs = this.config.approvalTimeoutMs;
+      let approved: boolean;
+
+      if (timeoutMs && timeoutMs > 0) {
+        approved = await this.raceWithTimeout(
+          this.config.onHumanRequired(request, decision),
+          timeoutMs,
+          "Human review timed out"
+        );
+      } else {
+        approved = await this.config.onHumanRequired(request, decision);
+      }
+
+      const event = createEvent(request, {
+        ...decision,
+        outcome: approved ? "ALLOW" : "DENY",
+        reasons: [
+          ...decision.reasons,
+          {
+            code: approved ? "HUMAN_APPROVED" : "HUMAN_REJECTED",
+            message: approved ? "Human reviewer approved" : "Human reviewer rejected",
+          },
+        ],
+      });
+      this.recordEvent(event);
+      return approved;
+    } catch (err) {
+      const event = createEvent(request, {
+        outcome: "DENY",
+        reasons: [...decision.reasons, { code: "HUMAN_REVIEW_ERROR", message: (err as Error).message }],
+      });
+      this.recordEvent(event);
+      this.reportError(err as Error, "onHumanRequired");
       return false;
     }
   }

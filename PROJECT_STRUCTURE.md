@@ -3,160 +3,142 @@
 ```
 agent-runtime-security/
 │
-├── README.md                       # SDK overview and quick start
-├── QUICKSTART.md                   # Getting started guide
+├── README.md                       # Platform overview and quick start
+├── QUICKSTART.md                   # Getting started guide (core + packages)
 ├── IMPLEMENTATION.md               # Implementation details and design decisions
 ├── PROJECT_STRUCTURE.md            # This file
-├── package.json                    # Root package (scripts for demos/build)
+├── CHANGELOG.md                    # Version history
+├── SECURITY.md                     # Security properties and threat model
+├── LICENSE                         # MIT license
+├── package.json                    # Root workspace config (scripts, workspaces)
 ├── tsconfig.json                   # Root TypeScript config
-├── demo.ts                         # Full demo (9 scenarios with plugins)
-├── test-demo.ts                    # Quick demo (5 scenarios)
+├── demo.ts                         # Full demo (9 core scenarios)
+├── test-demo.ts                    # Quick demo (5 core scenarios)
 ├── default-policy.json             # Example policy bundle
-├── .gitignore                      # Git ignore rules
 │
-├── core/                           # Core SDK package
-│   ├── package.json                # @agent-security/core
-│   ├── tsconfig.json               # TypeScript config
-│   ├── src/
-│   │   ├── index.ts                # Public exports (SDK, plugins, types)
-│   │   ├── sdk.ts                  # Main SDK client + plugin pipeline
-│   │   ├── schemas.ts              # TypeScript type definitions (v0.2)
-│   │   ├── evaluator.ts            # Policy evaluation engine (v0.2)
-│   │   ├── loader.ts               # Policy bundle loader (sync + async)
-│   │   ├── events.ts               # Audit event generator (UUID, plugin source)
-│   │   ├── default-policy.ts       # Default policy factory
-│   │   └── plugins/                # Built-in plugins
-│   │       ├── index.ts            # Plugin barrel exports
-│   │       ├── kill-switch.ts      # Emergency agent disable
-│   │       ├── rate-limiter.ts     # Per-agent/per-tool rate limiting
-│   │       ├── session-context.ts  # Cross-call session tracking
-│   │       └── output-validator.ts # Post-execution output scanning
-│   └── dist/                       # Compiled output (generated)
+├── core/                           # @agent-security/core
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── src/
+│       ├── index.ts                # Public exports
+│       ├── sdk.ts                  # AgentSecurity class + 5-phase plugin pipeline
+│       ├── schemas.ts              # Type definitions (v0.2)
+│       ├── evaluator.ts            # Policy evaluation engine (first-match)
+│       ├── loader.ts               # Policy loader (file, JSON, async, HMAC)
+│       ├── events.ts               # Audit event generator
+│       ├── default-policy.ts       # Default policy factory
+│       └── plugins/                # Built-in plugins
+│           ├── index.ts
+│           ├── kill-switch.ts      # Emergency agent disable
+│           ├── rate-limiter.ts     # Per-agent/per-tool rate limiting
+│           ├── session-context.ts  # Cross-call session tracking
+│           └── output-validator.ts # Post-execution output scanning
 │
-├── examples/                       # Integration examples
-│   ├── basic-usage.ts              # Simplest integration
+├── packages/
+│   ├── identity/                   # @agent-security/identity
+│   │   └── src/                    # AgentRegistry, ToolRegistry, TrustEvaluator, identityEnforcer
+│   │
+│   ├── egress/                     # @agent-security/egress
+│   │   └── src/                    # egressEnforcer, DLP classifiers, ComplianceReporter
+│   │
+│   ├── supply-chain/               # @agent-security/supply-chain
+│   │   └── src/                    # McpScanner, ToolProvenance, CommandGovernor, supplyChainGuard
+│   │
+│   ├── guardian/                   # @agent-security/guardian
+│   │   └── src/                    # GuardianAgent, blueprints (engineering, finance, SOC)
+│   │
+│   ├── posture/                    # @agent-security/posture
+│   │   └── src/                    # PostureInventory, RiskScorer, ComplianceMapper, SocFormatter
+│   │
+│   ├── containment/                # @agent-security/containment
+│   │   └── src/                    # SandboxManager, ChangeControl, containmentPlugin
+│   │
+│   └── adapters/                   # @agent-security/adapters
+│       └── src/                    # Cursor, Claude Code, LangChain, CrewAI adapters
+│
+├── examples/
+│   ├── README.md                   # Examples guide with learning progression
+│   ├── basic-usage.ts              # Minimal core integration
 │   ├── custom-approval.ts          # Approval workflow with timeout
-│   ├── protect-wrapper.ts          # Function wrapping pattern
-│   └── plugins-demo.ts             # All four built-in plugins
+│   ├── protect-wrapper.ts          # Function wrapping with protect()
+│   ├── plugins-demo.ts             # All four built-in core plugins
+│   ├── 01-identity-authz/          # Identity & trust-based access control
+│   ├── 02-egress-dlp/              # Data classification & egress enforcement
+│   ├── 03-supply-chain/            # MCP scanning, provenance, command governance
+│   ├── 04-guardian-posture/        # Anomaly detection, risk scoring, compliance
+│   └── 05-full-spm/               # All packages integrated end-to-end
 │
-└── docs/                           # Documentation
-    ├── architecture.md             # SDK architecture + plugin pipeline
-    ├── schemas.md                  # Schema specifications (v0.2)
-    ├── policies.md                 # Policy writing guide
-    └── build-order.md              # Development phases
+└── docs/
+    ├── architecture.md             # System architecture, pipeline, threat model
+    ├── schemas.md                  # Schema specification (v0.2)
+    ├── policies.md                 # Policy authoring guide
+    ├── packages.md                 # Full package API reference
+    └── compliance.md               # EU AI Act and UK AI Governance mapping
 ```
 
-## Module Structure
+## Package Overview
 
-### Core (`/core`)
+| Package | npm Scope | Security Domain |
+|---------|-----------|-----------------|
+| core | `@agent-security/core` | Policy engine, plugin pipeline, audit logging |
+| identity | `@agent-security/identity` | Agent/tool registration, trust evaluation |
+| egress | `@agent-security/egress` | Data loss prevention, egress channel control |
+| supply-chain | `@agent-security/supply-chain` | MCP scanning, tool provenance, command governance |
+| guardian | `@agent-security/guardian` | Anomaly detection, auto-kill, incident response |
+| posture | `@agent-security/posture` | Inventory, risk scoring, compliance mapping, SIEM |
+| containment | `@agent-security/containment` | Sandbox enforcement, change control |
+| adapters | `@agent-security/adapters` | Framework integration (Cursor, Claude Code, LangChain, CrewAI) |
 
-**Purpose**: The SDK package that enterprises install.
-
-**Exports**:
-- `AgentSecurity` — Main SDK client class
-- `SecurityError` — Custom error for blocked actions
-- `killSwitch` / `KillSwitchPlugin` — Emergency stop plugin
-- `rateLimiter` / `RateLimiterPlugin` — Rate limiting plugin
-- `sessionContext` / `SessionContextPlugin` — Session tracking plugin
-- `outputValidator` / `OutputValidatorPlugin` — Output scanning plugin
-- All type definitions (schemas, plugin interfaces)
-- Policy loader and evaluator
-
-**Usage**:
-```typescript
-import {
-  AgentSecurity,
-  killSwitch,
-  rateLimiter,
-  sessionContext,
-  outputValidator,
-} from '@agent-security/core';
-```
-
-### Examples (`/examples`)
-
-**Purpose**: Integration patterns and reference implementations.
-
-**Contents**:
-- Basic usage — minimal configuration
-- Custom approval workflows — Slack/email/ticketing patterns
-- Function wrappers with `protect()` — decorative security
-- Plugin usage — kill switch, rate limiter, session context, output validator
-
-### Docs (`/docs`)
-
-**Purpose**: Technical documentation.
-
-**Files**:
-- `architecture.md` — SDK architecture and plugin pipeline data flow
-- `schemas.md` — Type specifications (v0.2)
-- `policies.md` — Policy writing guide
-- `build-order.md` — Development phases
+All packages depend on `@agent-security/core`. Packages do not depend on each other — they compose at the application level.
 
 ## Data Flow
 
 ```
-Your Agent Code
+Your Agent Code (or Framework Adapter)
     ↓
 AgentSecurity.checkToolCall()
     ↓
-Phase 1: beforeCheck plugins (kill switch, rate limiter, session context)
-    ↓ (may short-circuit with DENY)
-Phase 2: PolicyEvaluator.evaluate()
+Phase 1: beforeCheck plugins
+    ├── Kill switch        → DENY if agent killed
+    ├── Rate limiter       → DENY if rate exceeded
+    ├── Identity enforcer  → DENY if unregistered / low trust
+    ├── Egress enforcer    → DENY if sensitive data in unauthorized channel
+    ├── Supply chain guard → DENY if provenance fails / command blocked
+    └── Containment plugin → DENY if sandbox violation / missing ticket
+    ↓
+Phase 2: PolicyEvaluator (first-match rule processing)
     ↓
 Phase 3: afterDecision plugins (modify/override)
     ↓
-Decision (ALLOW / DENY / REQUIRE_APPROVAL)
-    ↓
-Phase 4: Callbacks (onAllow / onDeny / onApprovalRequired)
+Phase 4: Decision callbacks
+    ├── onAllow / onDeny / onApprovalRequired
+    ├── onStepUpRequired / onTicketRequired / onHumanRequired
+    └── onAuditEvent → Guardian (anomaly detection) + SIEM export
     ↓
 Return { allowed, decision, events }
-    ↓
-Execute or block tool
 
 [If using protect() wrapper]:
     ↓
 Phase 5: afterExecution plugins (output validator)
     ↓
-Return result or throw
+Return result or throw SecurityError
+
+[External — on-demand]:
+    ├── Posture: inventory, risk scoring, compliance reports
+    └── Adapters: Cursor MCP, Claude Code, LangChain, CrewAI
 ```
 
-## Build Process
+## Build & Run
 
 ```bash
-# Install dependencies
-npm run install:all
+npm install                 # Install all workspace dependencies
+npm run build               # Build core + all packages
 
-# Build TypeScript
-npm run build
-
-# Run demos
-npm run demo           # Full demo (9 scenarios)
-npm run demo:quick     # Quick demo (5 scenarios)
+npm run demo                # Full core demo (9 scenarios)
+npm run demo:quick          # Quick core demo (5 scenarios)
+npm run demo:identity       # Identity & authorization demo
+npm run demo:egress         # DLP & egress control demo
+npm run demo:supply-chain   # Supply chain security demo
+npm run demo:guardian        # Guardian & posture demo
+npm run demo:full-spm        # All packages end-to-end
 ```
-
-## Key Files
-
-### SDK Implementation
-- `core/src/sdk.ts` — Main client with 5-phase plugin pipeline
-- `core/src/evaluator.ts` — Rule matching (arrays, globs, regex, numeric comparisons)
-- `core/src/loader.ts` — Sync + async policy loading
-- `core/src/events.ts` — UUID-based audit events with plugin attribution
-- `core/src/schemas.ts` — All type definitions including plugin interfaces
-
-### Built-in Plugins
-- `core/src/plugins/kill-switch.ts` — Emergency agent disable
-- `core/src/plugins/rate-limiter.ts` — Sliding window rate limits
-- `core/src/plugins/session-context.ts` — Per-session tool usage tracking
-- `core/src/plugins/output-validator.ts` — Post-execution scanning
-
-### Demos
-- `demo.ts` — 9 scenarios (plugins, approvals, advanced rules)
-- `test-demo.ts` — 5 scenarios (quick smoke test)
-- `default-policy.json` — Example policy bundle
-
-### Examples
-- `examples/basic-usage.ts` — Minimal integration
-- `examples/custom-approval.ts` — Approval with timeout
-- `examples/protect-wrapper.ts` — Function wrapping
-- `examples/plugins-demo.ts` — All built-in plugins

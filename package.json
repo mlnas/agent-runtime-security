@@ -1,13 +1,23 @@
 {
   "name": "agent-runtime-security",
-  "version": "0.1.0",
-  "description": "Open-source SDK for adding runtime security policies to AI agents",
+  "version": "0.2.0",
+  "description": "Agent Security Posture Management (Agent-SPM) SDK",
   "private": true,
+  "workspaces": [
+    "core",
+    "packages/*"
+  ],
   "scripts": {
-    "install:all": "cd core && npm install && cd .. && npm install",
-    "build": "cd core && npm run build",
+    "build": "npm run build:core && npm run build:packages",
+    "build:core": "cd core && npm run build",
+    "build:packages": "cd packages/identity && npm run build && cd ../egress && npm run build && cd ../supply-chain && npm run build && cd ../adapters && npm run build && cd ../guardian && npm run build && cd ../posture && npm run build && cd ../containment && npm run build",
     "demo": "npm run build && ts-node demo.ts",
-    "demo:quick": "npm run build && ts-node test-demo.ts"
+    "demo:quick": "npm run build && ts-node test-demo.ts",
+    "demo:identity": "npm run build && ts-node examples/01-identity-authz/demo.ts",
+    "demo:egress": "npm run build && ts-node examples/02-egress-dlp/demo.ts",
+    "demo:supply-chain": "npm run build && ts-node examples/03-supply-chain/demo.ts",
+    "demo:guardian": "npm run build && ts-node examples/04-guardian-posture/demo.ts",
+    "demo:full-spm": "npm run build && ts-node examples/05-full-spm/demo.ts"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

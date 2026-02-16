@@ -1,12 +1,12 @@
 # Quick Start Guide
 
-Get started with the Agent Runtime Security SDK in 5 minutes.
+Get started with Agent-SPM in 5 minutes.
 
 ## Installation
 
 ```bash
 # If you cloned the repo
-npm run install:all
+npm install
 npm run build
 
 # Or install as a package (when published)
@@ -336,9 +336,163 @@ await security.shutdown();
 4. **Monitor Audit Logs** — Use `onAuditEvent` to export to your observability stack
 5. **Version Policies** — Treat policies like code and version them in Git
 
+## Add Identity & Authorization
+
+Enforce agent registration and trust-based access control with `@agent-security/identity`.
+
+```bash
+npm install @agent-security/identity
+```
+
+```typescript
+import { AgentRegistry, ToolRegistry, TrustEvaluator, identityEnforcer } from '@agent-security/identity';
+
+const agentRegistry = new AgentRegistry();
+agentRegistry.register({
+  agent_id: 'finance-bot',
+  name: 'Finance Bot',
+  owner: 'finance-team@acme.com',
+  environment: 'prod',
+  agent_type: 'workflow_agent',
+  trust_level: 'privileged',
+  roles: ['finance.reader', 'finance.writer'],
+  capabilities: ['tool_call'],
+});
+
+const security = new AgentSecurity({
+  policyPath: './policy.json',
+  plugins: [
+    identityEnforcer({
+      agentRegistry,
+      toolRegistry: new ToolRegistry(),
+      trustEvaluator: new TrustEvaluator(),
+      requireRegistration: true,
+      minimumTrustLevel: 'basic',
+    }),
+  ],
+});
+```
+
+## Add Egress Control & DLP
+
+Prevent sensitive data from leaving through unauthorized channels with `@agent-security/egress`.
+
+```bash
+npm install @agent-security/egress
+```
+
+```typescript
+import { egressEnforcer, DEFAULT_CLASSIFIERS } from '@agent-security/egress';
+
+const egress = egressEnforcer({
+  policy: {
+    rules: [
+      { id: 'BLOCK_PII_EMAIL', description: 'No PII via email', classifications: ['PII'], channels: ['email'], action: 'block' },
+      { id: 'BLOCK_SECRETS', description: 'No secrets anywhere', classifications: ['SECRET'], action: 'block' },
+    ],
+    default_action: 'allow',
+  },
+  classifiers: DEFAULT_CLASSIFIERS,
+  toolChannelMappings: [
+    { tool_name: 'send_email', channel: 'email', destination_field: 'to' },
+    { tool_name: 'http_request', channel: 'http_request', destination_field: 'url' },
+  ],
+});
+
+const security = new AgentSecurity({
+  policyPath: './policy.json',
+  plugins: [egress],
+});
+```
+
+## Add Supply Chain Security
+
+Verify tool provenance and govern shell commands with `@agent-security/supply-chain`.
+
+```bash
+npm install @agent-security/supply-chain
+```
+
+```typescript
+import { supplyChainGuard, ToolProvenance, CommandGovernor } from '@agent-security/supply-chain';
+
+const plugin = supplyChainGuard({
+  provenance: new ToolProvenance(),
+  commandGovernor: new CommandGovernor({
+    rules: [
+      { pattern: 'npm test', action: 'allow', reason: 'Tests are safe' },
+      { pattern: 'rm -rf *', action: 'block', reason: 'Destructive operations blocked' },
+      { pattern: 'curl', action: 'block', reason: 'External network calls blocked' },
+    ],
+    default_action: 'block',
+  }),
+  blockUnverifiedMcp: true,
+});
+
+const security = new AgentSecurity({
+  policyPath: './policy.json',
+  plugins: [plugin],
+});
+```
+
+## Add Guardian & Posture
+
+Monitor for anomalies, score fleet risk, and generate compliance reports with `@agent-security/guardian` and `@agent-security/posture`.
+
+```bash
+npm install @agent-security/guardian @agent-security/posture
+```
+
+```typescript
+import { GuardianAgent, BLUEPRINT_FINANCE } from '@agent-security/guardian';
+import { RiskScorer, ComplianceMapper, SocFormatter } from '@agent-security/posture';
+
+const guardian = new GuardianAgent({
+  ...BLUEPRINT_FINANCE,
+  auto_kill_threshold: 3,
+  onAnomaly: (incident) => alertSecurityTeam(incident),
+});
+
+const socFormatter = new SocFormatter();
+
+const security = new AgentSecurity({
+  policyBundle,
+  plugins: [/* your plugins */],
+  onAuditEvent: (event) => {
+    guardian.processEvent(event);                    // Anomaly detection
+    siem.send(socFormatter.toCef(event).raw);       // SIEM export
+  },
+});
+
+// Compliance reporting
+const mapper = new ComplianceMapper();
+const report = mapper.generateReport('eu_ai_act', {
+  hasInventory: true,
+  hasAuditLog: true,
+  hasRiskScoring: true,
+  hasDlp: true,
+  hasHumanOversight: true,
+  hasSupplyChainVerification: true,
+  hasGuardian: true,
+  hasIdentityManagement: true,
+});
+```
+
+## Run the Package Demos
+
+```bash
+npm run demo:identity       # Identity & authorization
+npm run demo:egress         # DLP & egress control
+npm run demo:supply-chain   # Tool provenance & command governance
+npm run demo:guardian        # Anomaly detection & posture management
+npm run demo:full-spm        # All packages integrated end-to-end
+```
+
 ## Next Steps
 
-- See [examples/](./examples/) for integration patterns
-- Read [docs/architecture.md](./docs/architecture.md) for how the plugin pipeline works
-- Read [docs/policies.md](./docs/policies.md) for policy writing in depth
+- See [examples/](./examples/) for all integration demos and learning progression
+- Read [docs/architecture.md](./docs/architecture.md) for the plugin pipeline and data flow
+- Read [docs/packages.md](./docs/packages.md) for the full package API reference
+- Read [docs/policies.md](./docs/policies.md) for policy authoring in depth
+- Read [docs/compliance.md](./docs/compliance.md) for regulatory compliance mapping
 - Review [IMPLEMENTATION.md](./IMPLEMENTATION.md) for design decisions

@@ -1,0 +1,23 @@
+{
+  "name": "@agent-security/guardian",
+  "version": "0.1.0",
+  "description": "Guardian agents for Agent-SPM fleet monitoring and anomaly detection",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "keywords": ["agent", "security", "guardian", "anomaly", "spm"],
+  "license": "MIT",
+  "dependencies": {
+    "@agent-security/core": "*",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.3.3"
+  }
+}

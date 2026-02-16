@@ -1,4 +1,16 @@
-import { AgentActionRequest, Decision, PolicyBundle, PolicyRule } from "./schemas";
+import { AgentActionRequest, AgentTrustLevel, Decision, PolicyBundle, PolicyRule } from "./schemas";
+
+// ---------------------------------------------------------------------------
+// Trust level ordering (higher = more trusted)
+// ---------------------------------------------------------------------------
+
+const TRUST_LEVEL_ORDER: Record<AgentTrustLevel, number> = {
+  untrusted: 0,
+  basic: 1,
+  verified: 2,
+  privileged: 3,
+  system: 4,
+};
 
 // ---------------------------------------------------------------------------
 // Regex safety utilities
@@ -138,6 +150,10 @@ export class PolicyEvaluator {
   private matchesRule(request: AgentActionRequest, rule: PolicyRule): boolean {
     if (!this.matchesToolName(request, rule)) return false;
     if (!this.matchesEnvironment(request, rule)) return false;
+    if (!this.matchesAgentType(request, rule)) return false;
+    if (!this.matchesTrustLevel(request, rule)) return false;
+    if (!this.matchesAgentRoles(request, rule)) return false;
+    if (!this.matchesToolProvider(request, rule)) return false;
     if (!this.matchesWhenConditions(request, rule)) return false;
     return true;
   }
@@ -170,6 +186,56 @@ export class PolicyEvaluator {
     const { environment } = rule.match;
     if (environment === "*") return true;
     return environment === request.agent.environment;
+  }
+
+  /**
+   * Match agent_type — supports single type or array of types.
+   */
+  private matchesAgentType(request: AgentActionRequest, rule: PolicyRule): boolean {
+    if (!rule.match.agent_type) return true;
+    const agentType = request.agent.agent_type;
+    if (!agentType) return false;
+
+    if (Array.isArray(rule.match.agent_type)) {
+      return rule.match.agent_type.includes(agentType);
+    }
+    return rule.match.agent_type === agentType;
+  }
+
+  /**
+   * Match trust_level_min — agent must meet or exceed the minimum trust level.
+   */
+  private matchesTrustLevel(request: AgentActionRequest, rule: PolicyRule): boolean {
+    if (!rule.match.trust_level_min) return true;
+    const agentLevel = request.agent.trust_level;
+    if (!agentLevel) return false;
+
+    return TRUST_LEVEL_ORDER[agentLevel] >= TRUST_LEVEL_ORDER[rule.match.trust_level_min];
+  }
+
+  /**
+   * Match agent_roles_any — agent must have at least one of the specified roles.
+   */
+  private matchesAgentRoles(request: AgentActionRequest, rule: PolicyRule): boolean {
+    if (!rule.match.agent_roles_any || rule.match.agent_roles_any.length === 0) return true;
+    const agentRoles = request.agent.roles;
+    if (!agentRoles || agentRoles.length === 0) return false;
+
+    return rule.match.agent_roles_any.some((role) => agentRoles.includes(role));
+  }
+
+  /**
+   * Match tool_provider — supports single provider or array of providers.
+   */
+  private matchesToolProvider(request: AgentActionRequest, rule: PolicyRule): boolean {
+    if (!rule.match.tool_provider) return true;
+    const provider = request.action.tool_identity?.provider;
+    if (!provider) return false;
+
+    if (Array.isArray(rule.match.tool_provider)) {
+      return rule.match.tool_provider.includes(provider);
+    }
+    return rule.match.tool_provider === provider;
   }
 
   /**

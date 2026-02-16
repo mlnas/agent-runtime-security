@@ -1,0 +1,21 @@
+{
+  "name": "@agent-security/adapters",
+  "version": "0.1.0",
+  "description": "Framework adapters for Agent-SPM (Cursor, Claude Code, LangChain, CrewAI)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "keywords": ["agent", "security", "adapter", "langchain", "cursor", "crewai"],
+  "license": "MIT",
+  "dependencies": {
+    "@agent-security/core": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3"
+  }
+}

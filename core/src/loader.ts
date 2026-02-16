@@ -11,6 +11,9 @@ const VALID_OUTCOMES: ReadonlySet<string> = new Set<DecisionOutcome>([
   "ALLOW",
   "DENY",
   "REQUIRE_APPROVAL",
+  "STEP_UP",
+  "REQUIRE_TICKET",
+  "REQUIRE_HUMAN",
 ]);
 
 /**
