@@ -1,7 +1,7 @@
 /**
- * Agent Runtime Security - Core SDK
+ * Agent Runtime Security - Core Platform
  *
- * Open-source SDK for adding runtime security policies to AI agents.
+ * Open-source runtime security platform for AI agents.
  * Features a plugin architecture with lifecycle hooks for extensibility.
  *
  * @example

@@ -1,7 +1,7 @@
 /**
  * Canonical Schemas (v0.3 — Agent-SPM)
  *
- * These schemas are the contract for the Agent Security Posture Management SDK.
+ * These schemas are the contract for the Agent Security Posture Management Platform.
  * They define the core data structures used across policy evaluation,
  * identity management, egress control, audit logging, and plugin lifecycle.
  */
@@ -241,7 +241,7 @@ export interface SecurityPlugin {
   readonly failOpen?: boolean;
 
   /**
-   * Called once when the plugin is registered with the SDK.
+   * Called once when the plugin is registered with the platform.
    * Use for setup, connecting to external services, etc.
    */
   initialize?(): Promise<void>;
@@ -267,7 +267,7 @@ export interface SecurityPlugin {
   afterExecution?(context: AfterExecutionContext): Promise<void>;
 
   /**
-   * Called when the SDK is being shut down.
+   * Called when the platform is being shut down.
    * Use for cleanup, flushing logs, disconnecting, etc.
    */
   destroy?(): Promise<void>;

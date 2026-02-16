@@ -1,7 +1,7 @@
 /**
  * Basic Usage Example
  *
- * Shows the simplest way to integrate the SDK — no plugins required.
+ * Shows the simplest way to integrate the platform — no plugins required.
  */
 
 import { AgentSecurity } from "../core/src";

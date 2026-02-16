@@ -6,7 +6,7 @@ Agent Security Posture Management (Agent-SPM) platform providing runtime securit
 
 ## What Was Built
 
-### Core SDK (`/core`) — `@agent-security/core`
+### Core Platform (`/core`) — `@agent-security/core`
 
 **Purpose**: Lightweight, in-process security layer with a 5-phase plugin pipeline.
 
@@ -145,9 +145,9 @@ Agent Security Posture Management (Agent-SPM) platform providing runtime securit
 
 ## Design Decisions
 
-### 1. SDK Over Gateway
+### 1. In-Process Platform Over Gateway
 
-**Decision**: In-process SDK, not separate HTTP service.
+**Decision**: In-process platform, not separate HTTP service.
 
 **Rationale**:
 - Lower latency (no network calls)
@@ -157,7 +157,7 @@ Agent Security Posture Management (Agent-SPM) platform providing runtime securit
 
 **Trade-offs**:
 - No centralized enforcement point (mitigated by remote policy loading)
-- Each agent needs SDK integration
+- Each agent needs platform integration
 - Policy updates require reload (mitigated by `reloadPolicyAsync`)
 
 ### 2. Plugin Architecture
@@ -188,7 +188,7 @@ Agent Security Posture Management (Agent-SPM) platform providing runtime securit
 
 **Rationale**:
 - Enterprises have existing approval systems (Slack, ServiceNow, etc.)
-- SDK shouldn't dictate approval UX
+- The platform shouldn't dictate approval UX
 - Timeout prevents hangs from unresponsive callbacks
 
 ### 5. Flexible Schemas (v0.2)
@@ -250,18 +250,18 @@ npx ts-node examples/plugins-demo.ts
 
 ## What's NOT Included (by Design)
 
-- HTTP gateway/server — enterprises embed the SDK directly
+- HTTP gateway/server — enterprises embed the platform directly
 - Built-in approval UI — enterprises have their own
 - Persistent audit storage — use `onAuditEvent` to export
 - Authentication/authorization — handled by the host application
 - Policy management UI — separate concern
-- Network-level controls — out of scope for an in-process SDK
+- Network-level controls — out of scope for an in-process platform
 
 ## Integration Points
 
 Enterprises integrate at these points:
 
-1. **Initialization** — Configure SDK with policy + plugins
+1. **Initialization** — Configure platform with policy + plugins
 2. **Tool Execution** — Call `checkToolCall()` or use `protect()` or framework adapter
 3. **Identity** — Register agents and tools, configure trust requirements
 4. **Egress Control** — Define classifiers and channel policies
@@ -284,7 +284,7 @@ Enterprises integrate at these points:
 
 ### Performance
 - Policy evaluation: < 1ms
-- No network calls in core SDK
+- No network calls in core platform
 - Plugins execute in-memory
 - Async only for approvals and remote policy loading
 - AsyncMutex serializes concurrent checks to prevent race conditions

@@ -212,10 +212,10 @@ async function main() {
   log("Configured: Identity, Egress/DLP, Supply Chain, Containment, Guardian");
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Phase 3: Assemble the SDK with all plugins + policies
+  // Phase 3: Assemble the platform with all plugins + policies
   // ═══════════════════════════════════════════════════════════════════════════
 
-  section("Phase 3: SDK Assembly");
+  section("Phase 3: Platform Assembly");
 
   const policyBundle: PolicyBundle = {
     version: "1.0",
@@ -292,7 +292,7 @@ async function main() {
     },
   });
 
-  log("SDK assembled with 4 plugins, 5 policy rules, and all callbacks");
+  log("Platform assembled with 4 plugins, 5 policy rules, and all callbacks");
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Phase 4: Scenario execution

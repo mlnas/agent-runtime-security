@@ -133,7 +133,7 @@ async function main() {
     defaults: { outcome: "DENY" },
   };
 
-  // --- Set up SDK with identity enforcer ---
+  // --- Set up platform with identity enforcer ---
   const security = new AgentSecurity({
     policyBundle,
     plugins: [

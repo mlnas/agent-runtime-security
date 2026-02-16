@@ -413,7 +413,7 @@ const guardian = new GuardianAgent({
   },
 });
 
-// Feed audit events from the core SDK
+// Feed audit events from the core platform
 const security = new AgentSecurity({
   policyBundle,
   onAuditEvent: (event) => {

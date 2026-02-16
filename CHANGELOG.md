@@ -92,7 +92,7 @@ All notable changes to the Agent-SPM platform.
 
 ### Changed
 - Schemas updated to v0.2
-- Open-source SDK transform (removed proprietary dependencies)
+- Open-source platform transform (removed proprietary dependencies)
 
 ---
 

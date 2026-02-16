@@ -87,7 +87,7 @@ async function main() {
   console.log("--- Inventory Summary ---");
   console.log(`  ${JSON.stringify(inventory.getSummary())}\n`);
 
-  // --- Set up SDK ---
+  // --- Set up platform ---
   const policyBundle: PolicyBundle = {
     version: "1.0",
     generated_at: new Date().toISOString(),

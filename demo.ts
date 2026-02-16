@@ -12,7 +12,7 @@ import type { SessionContextPlugin } from "./core/src/plugins/session-context";
 import { AgentActionRequest, Decision } from "./core/src/schemas";
 
 /**
- * Agent Runtime Security SDK — Full Demo
+ * Agent Runtime Security Platform — Full Demo
  *
  * Showcases:
  *   1. Plugin architecture (kill switch, rate limiter, session context)
@@ -38,7 +38,7 @@ const sc = sessionContext({
   sessionTtlMs: 600_000,
 });
 
-// ----- Initialize SDK -----
+// ----- Initialize Platform -----
 
 const security = new AgentSecurity({
   policyPath: "./default-policy.json",
@@ -93,7 +93,7 @@ function header(title: string): void {
 async function runDemo() {
   console.log(`
 ╔════════════════════════════════════════════════════════════╗
-║     Agent Runtime Security SDK v0.2 — Full Demo            ║
+║     Agent Runtime Security Platform v0.2 — Full Demo       ║
 ║     Plugin Architecture + Policy Engine                    ║
 ╚════════════════════════════════════════════════════════════╝
 `);

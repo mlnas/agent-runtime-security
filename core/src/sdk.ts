@@ -24,7 +24,7 @@ import { createEvent } from "./events";
 const DEFAULT_MAX_AUDIT_LOG_SIZE = 10_000;
 
 /**
- * SDK configuration options.
+ * Platform configuration options.
  */
 export interface AgentSecurityConfig {
   // -- Policy sources (at least one required for sync init; or use `init()`) --
@@ -151,11 +151,11 @@ class AsyncMutex {
 }
 
 // ---------------------------------------------------------------------------
-// AgentSecurity — main SDK entry point
+// AgentSecurity — main platform entry point
 // ---------------------------------------------------------------------------
 
 /**
- * Agent Security SDK Client.
+ * AgentSecurity — Agent Runtime Security Platform client.
  *
  * Provides runtime security enforcement for AI agent tool calls via a
  * configurable plugin pipeline:
@@ -536,7 +536,7 @@ export class AgentSecurity {
   // -----------------------------------------------------------------------
 
   /**
-   * Gracefully shut down the SDK and all plugins.
+   * Gracefully shut down the platform and all plugins.
    */
   async shutdown(): Promise<void> {
     for (const plugin of this.plugins) {
@@ -665,7 +665,7 @@ export class AgentSecurity {
       try {
         this.config.onError(error, context);
       } catch {
-        // Prevent error callback from crashing the SDK
+        // Prevent error callback from crashing the platform
       }
     }
   }

@@ -1,5 +1,5 @@
 /**
- * Built-in Plugins for Agent Runtime Security SDK
+ * Built-in Plugins for Agent Runtime Security Platform
  *
  * All plugins are optional and tree-shakeable.
  * Import only what you need:

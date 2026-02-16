@@ -33,7 +33,7 @@ const security = new AgentSecurity({
 
 async function main() {
   console.log("\n╔════════════════════════════════════════════════╗");
-  console.log("║   Agent Runtime Security SDK — Quick Demo     ║");
+  console.log("║   Agent Runtime Security Platform — Quick Demo ║");
   console.log("╚════════════════════════════════════════════════╝");
 
   // 1. ALLOW

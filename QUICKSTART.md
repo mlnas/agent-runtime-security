@@ -44,7 +44,7 @@ Create `policy.json`:
 }
 ```
 
-### 2. Initialize the SDK
+### 2. Initialize the Platform
 
 ```typescript
 import { AgentSecurity } from '@agent-security/core';
@@ -88,7 +88,7 @@ async function executeAgentTool(toolName: string, args: any) {
 
 ## Add Plugins
 
-Plugins extend the SDK with runtime protections beyond static policy rules.
+Plugins extend the platform with runtime protections beyond static policy rules.
 
 ### Kill Switch + Rate Limiter
 

@@ -1,7 +1,7 @@
 {
   "name": "agent-runtime-security",
   "version": "0.2.0",
-  "description": "Agent Security Posture Management (Agent-SPM) SDK",
+  "description": "Agent Security Posture Management (Agent-SPM) Platform",
   "private": true,
   "workspaces": [
     "core",

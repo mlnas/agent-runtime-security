@@ -1,7 +1,7 @@
 {
   "name": "@agent-security/core",
   "version": "0.1.0",
-  "description": "Open-source SDK for adding runtime security policies to AI agents",
+  "description": "Open-source runtime security platform for AI agents",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
