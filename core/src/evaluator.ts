@@ -21,9 +21,12 @@ const TRUST_LEVEL_ORDER: Record<AgentTrustLevel, number> = {
  * Checks for nested quantifiers, overlapping alternations, etc.
  */
 const DANGEROUS_REGEX_PATTERNS = [
-  /\(.*[+*].*\)[+*]/, // nested quantifiers: (a+)+, (a*)*
-  /\(.*\|.*\)[+*]/,   // alternation inside quantifier: (a|a)+
-  /\(.*[+*].*\)\{/,   // nested quantifier with repetition: (a+){2,}
+  /\(.*[+*].*\)[+*]/,    // nested quantifiers: (a+)+, (a*)*
+  /\(.*\|.*\)[+*]/,      // alternation inside quantifier: (a|a)+
+  /\(.*[+*].*\)\{/,      // nested quantifier with repetition: (a+){2,}
+  /\([^)]*\*[^)]*\)\*/,  // nested star quantifiers: (a*b*)*
+  /\([^)]*\+[^)]*\)\+/,  // nested plus quantifiers: (a+b+)+
+  /(\.\*){2,}/,           // multiple .* in sequence: .*.*
 ];
 
 const MAX_REGEX_LENGTH = 512;
@@ -53,6 +56,9 @@ function isSafeRegex(pattern: string): boolean {
  */
 const regexCache = new Map<string, RegExp | null>();
 
+const REGEX_TIMEOUT_MS = 100;
+const REGEX_PROBE_INPUT = "a".repeat(100);
+
 function getSafeRegex(pattern: string): RegExp | null {
   if (regexCache.has(pattern)) return regexCache.get(pattern)!;
 
@@ -61,14 +67,30 @@ function getSafeRegex(pattern: string): RegExp | null {
     return null;
   }
 
+  let regex: RegExp;
   try {
-    const regex = new RegExp(pattern, "i");
-    regexCache.set(pattern, regex);
-    return regex;
+    regex = new RegExp(pattern, "i");
   } catch {
     regexCache.set(pattern, null);
     return null;
   }
+
+  // Practical timeout test: run the compiled regex against a probe string and
+  // reject it if execution takes longer than REGEX_TIMEOUT_MS milliseconds.
+  try {
+    const start = Date.now();
+    regex.test(REGEX_PROBE_INPUT);
+    if (Date.now() - start > REGEX_TIMEOUT_MS) {
+      regexCache.set(pattern, null);
+      return null;
+    }
+  } catch {
+    regexCache.set(pattern, null);
+    return null;
+  }
+
+  regexCache.set(pattern, regex);
+  return regex;
 }
 
 // ---------------------------------------------------------------------------

@@ -263,6 +263,16 @@ export class AgentSecurity {
    * in stateful plugins (rate limiter, session context).
    */
   async checkToolCall(params: CheckToolCallParams): Promise<SecurityCheckResult> {
+    if (!params.toolName || typeof params.toolName !== 'string') {
+      throw new TypeError('toolName must be a non-empty string');
+    }
+    if (params.toolArgs === null || typeof params.toolArgs !== 'object' || Array.isArray(params.toolArgs)) {
+      throw new TypeError('toolArgs must be a non-null, non-array object');
+    }
+    if (!params.agentId || typeof params.agentId !== 'string') {
+      throw new TypeError('agentId must be a non-empty string');
+    }
+
     this.ensureInitialized();
 
     // Serialize through the mutex to prevent concurrent TOCTOU races
@@ -588,6 +598,11 @@ export class AgentSecurity {
    * Record an audit event. Enforces max log size (FIFO eviction).
    */
   private recordEvent(event: Event): void {
+    if (this.auditLog.some(e => e.event_id === event.event_id)) {
+      console.warn(`[AgentSecurity] Duplicate audit event detected and dropped: ${event.event_id}`);
+      return;
+    }
+
     this.auditLog.push(event);
 
     // Evict oldest events when the log exceeds the max size

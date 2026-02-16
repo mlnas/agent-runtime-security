@@ -82,9 +82,22 @@ export function sessionContext(config: SessionContextConfig = {}): SessionContex
     }
   }
 
+  let cleanupInterval: NodeJS.Timeout | null = null;
+
   const plugin: SessionContextPlugin = {
     name: "session-context",
     version: "1.0.0",
+
+    async initialize(): Promise<void> {
+      cleanupInterval = setInterval(cleanup, 5 * 60 * 1000);
+    },
+
+    async destroy(): Promise<void> {
+      if (cleanupInterval !== null) {
+        clearInterval(cleanupInterval);
+        cleanupInterval = null;
+      }
+    },
 
     /**
      * Phase 1: Check session limits BEFORE policy evaluation.
@@ -115,9 +128,6 @@ export function sessionContext(config: SessionContextConfig = {}): SessionContex
           },
         };
       }
-
-      // Occasional cleanup
-      if (Math.random() < 0.01) cleanup();
     },
 
     /**

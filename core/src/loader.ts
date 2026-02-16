@@ -16,11 +16,18 @@ const VALID_OUTCOMES: ReadonlySet<string> = new Set<DecisionOutcome>([
   "REQUIRE_HUMAN",
 ]);
 
+const DEFAULT_MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024; // 1 MB
+const MAX_JSON_SIZE_BYTES = 1 * 1024 * 1024;         // 1 MB
+const MAX_OBJECT_DEPTH = 20;
+const MAX_RULES = 1000;
+const HMAC_HEX_LENGTH = 64; // SHA-256 produces 32 bytes = 64 hex chars
+const VALID_HEX_RE = /^[0-9a-f]+$/;
+
 /**
  * PolicyBundleLoader - loads and validates policy bundles from multiple sources.
  *
  * Supports:
- *   - File path (sync, with path sanitization)
+ *   - File path (sync, with path sanitization and size limits)
  *   - JSON string (sync)
  *   - PolicyBundle object (sync)
  *   - Custom async loader function
@@ -34,12 +41,14 @@ export class PolicyBundleLoader {
    * @param filePath Path to the policy JSON file
    * @param options.allowedBasePath Restrict file loading to this directory (default: cwd)
    * @param options.signatureSecret HMAC secret for integrity verification
+   * @param options.maxSizeBytes Maximum allowed file size in bytes (default: 1 MB)
    */
   static loadFromFile(
     filePath: string,
-    options?: { allowedBasePath?: string; signatureSecret?: string }
+    options?: { allowedBasePath?: string; signatureSecret?: string; maxSizeBytes?: number }
   ): PolicyBundle {
-    const sanitized = this.sanitizePath(filePath, options?.allowedBasePath);
+    const maxSizeBytes = options?.maxSizeBytes ?? DEFAULT_MAX_FILE_SIZE_BYTES;
+    const sanitized = this.sanitizePath(filePath, options?.allowedBasePath, maxSizeBytes);
     const content = fs.readFileSync(sanitized, "utf-8");
     const bundle = this.parseAndValidate(content, options?.signatureSecret);
     return bundle;
@@ -104,7 +113,7 @@ export class PolicyBundleLoader {
    *
    * @param bundle The policy bundle to sign (signature field is excluded from hash)
    * @param secret The HMAC secret key
-   * @returns hex-encoded HMAC signature
+   * @returns hex-encoded HMAC signature (64 characters)
    */
   static computeSignature(bundle: PolicyBundle, secret: string): string {
     const { signature: _, ...bundleWithoutSig } = bundle;
@@ -128,12 +137,28 @@ export class PolicyBundleLoader {
    * Full validation: parse JSON string, validate shape and semantics.
    */
   private static parseAndValidate(json: string, signatureSecret?: string): PolicyBundle {
+    // Enforce JSON string size limit to prevent JSON bombs
+    if (Buffer.byteLength(json, "utf-8") > MAX_JSON_SIZE_BYTES) {
+      throw new Error(
+        `PolicyBundle JSON exceeds maximum allowed size of ${MAX_JSON_SIZE_BYTES} bytes`
+      );
+    }
+
     let raw: unknown;
     try {
       raw = JSON.parse(json);
     } catch (err) {
       throw new Error(`PolicyBundle JSON parse error: ${(err as Error).message}`);
     }
+
+    // Enforce object depth limit to prevent deeply-nested JSON bombs
+    const depth = this.getObjectDepth(raw);
+    if (depth > MAX_OBJECT_DEPTH) {
+      throw new Error(
+        `PolicyBundle JSON exceeds maximum object depth of ${MAX_OBJECT_DEPTH} (actual depth: ${depth})`
+      );
+    }
+
     const bundle = this.validateShape(raw);
     this.validateSemantics(bundle);
     if (signatureSecret) {
@@ -165,6 +190,13 @@ export class PolicyBundleLoader {
     }
     if (!Array.isArray(obj.rules)) {
       throw new Error("PolicyBundle 'rules' must be an array");
+    }
+
+    // Enforce max rules limit
+    if (obj.rules.length > MAX_RULES) {
+      throw new Error(
+        `PolicyBundle exceeds maximum rule count of ${MAX_RULES} (actual: ${obj.rules.length})`
+      );
     }
 
     // Defaults
@@ -272,11 +304,20 @@ export class PolicyBundleLoader {
 
   /**
    * Verify the HMAC-SHA256 signature of a policy bundle.
-   * Throws if signature is missing or invalid.
+   * Throws if signature is missing, malformed, or invalid.
+   * Error messages are kept generic to avoid leaking information.
    */
   private static verifySignature(bundle: PolicyBundle, secret: string): void {
     if (!bundle.signature) {
       throw new Error("PolicyBundle signature is required but missing");
+    }
+
+    // Validate hex format and length before parsing
+    if (bundle.signature.length !== HMAC_HEX_LENGTH) {
+      throw new Error("PolicyBundle signature verification failed — policy may have been tampered with");
+    }
+    if (!VALID_HEX_RE.test(bundle.signature)) {
+      throw new Error("PolicyBundle signature verification failed — policy may have been tampered with");
     }
 
     const expected = this.computeSignature(bundle, secret);
@@ -285,7 +326,7 @@ export class PolicyBundleLoader {
     const sigBuffer = Buffer.from(bundle.signature, "hex");
     const expectedBuffer = Buffer.from(expected, "hex");
 
-    if (sigBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
+    if (!crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
       throw new Error("PolicyBundle signature verification failed — policy may have been tampered with");
     }
   }
@@ -295,10 +336,15 @@ export class PolicyBundleLoader {
   // -----------------------------------------------------------------------
 
   /**
-   * Sanitize a file path to prevent path traversal attacks.
-   * Resolves to absolute path and verifies it's within the allowed base directory.
+   * Sanitize a file path to prevent path traversal and symlink attacks.
+   * Resolves to absolute path, verifies it's within the allowed base directory,
+   * uses lstat() to detect symlinks, and checks file size before reading.
    */
-  private static sanitizePath(filePath: string, allowedBasePath?: string): string {
+  private static sanitizePath(
+    filePath: string,
+    allowedBasePath?: string,
+    maxSizeBytes: number = DEFAULT_MAX_FILE_SIZE_BYTES
+  ): string {
     const resolved = path.resolve(filePath);
     const base = allowedBasePath ? path.resolve(allowedBasePath) : path.resolve(".");
 
@@ -309,12 +355,10 @@ export class PolicyBundleLoader {
       );
     }
 
-    // Ensure the file exists and is a regular file
+    // Use lstat() instead of stat() to detect and reject symlinks
+    let lstat: fs.Stats;
     try {
-      const stat = fs.statSync(resolved);
-      if (!stat.isFile()) {
-        throw new Error(`Policy path "${resolved}" is not a regular file`);
-      }
+      lstat = fs.lstatSync(resolved);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
         throw new Error(`Policy file not found: "${resolved}"`);
@@ -322,7 +366,56 @@ export class PolicyBundleLoader {
       throw err;
     }
 
+    if (lstat.isSymbolicLink()) {
+      throw new Error(
+        `Policy file "${resolved}" is a symbolic link — symlinks are not allowed to prevent TOCTOU attacks`
+      );
+    }
+
+    if (!lstat.isFile()) {
+      throw new Error(`Policy path "${resolved}" is not a regular file`);
+    }
+
+    // Validate file size before reading to prevent resource exhaustion
+    if (lstat.size > maxSizeBytes) {
+      throw new Error(
+        `Policy file "${resolved}" exceeds maximum allowed size of ${maxSizeBytes} bytes (actual: ${lstat.size} bytes)`
+      );
+    }
+
     return resolved;
+  }
+
+  // -----------------------------------------------------------------------
+  // Helpers
+  // -----------------------------------------------------------------------
+
+  /**
+   * Compute the maximum nesting depth of a JSON value.
+   * Used to detect deeply-nested JSON bombs before full traversal.
+   */
+  private static getObjectDepth(value: unknown, currentDepth = 0): number {
+    if (currentDepth > MAX_OBJECT_DEPTH) {
+      // Short-circuit: already over the limit, no need to go deeper
+      return currentDepth;
+    }
+
+    if (value === null || typeof value !== "object") {
+      return currentDepth;
+    }
+
+    if (Array.isArray(value)) {
+      if (value.length === 0) return currentDepth + 1;
+      return Math.max(...value.map((item) => this.getObjectDepth(item, currentDepth + 1)));
+    }
+
+    const keys = Object.keys(value as object);
+    if (keys.length === 0) return currentDepth + 1;
+    return Math.max(
+      ...keys.map((key) =>
+        this.getObjectDepth((value as Record<string, unknown>)[key], currentDepth + 1)
+      )
+    );
   }
 
   // -----------------------------------------------------------------------
