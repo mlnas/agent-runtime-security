@@ -67,6 +67,35 @@ AI agents can cause serious damage:
 
 ![Workflow](workflow.png)
 
+### Deployment Architecture
+
+For production deployments, run Agent-SPM in two processes:
+
+```mermaid
+graph LR
+    subgraph AgentProc["Agent Process"]
+        direction TB
+        Tools["Your Agent + Tools"]
+        Core["AgentSecurity (core)"]
+        Tools --> Core
+        subgraph PluginLayer["Plugin Layer"]
+            DLP["DLP / Identity"]
+            KS["Kill Switch"]
+            RL["Rate Limiter"]
+        end
+        Core --> PluginLayer
+    end
+
+    subgraph GuardianProc["Guardian Process"]
+        GA["GuardianAgent\n(anomaly detection · auto-kill)"]
+    end
+
+    Core -- "audit events (IPC)" --> GA
+    GA -- "stream" --> SIEM[("External SIEM\n(tamper-proof audit trail)")]
+```
+
+This ensures Guardian operates outside the agent's blast radius. A compromised agent process cannot tamper with Guardian's enforcement or the external audit record.
+
 **[See detailed architecture →](./docs/architecture.md)**
 
 ---

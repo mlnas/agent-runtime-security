@@ -399,32 +399,39 @@ Autonomous anomaly detection and incident response. Monitors audit events for su
 
 Processes audit events and detects anomalies: frequency spikes, volume spikes, suspicious sequences, and off-hours activity.
 
+> **Production recommendation:** Run the Guardian in a separate Node.js process. This ensures the security observer is outside the agent's blast radius — a compromised agent process cannot tamper with Guardian's enforcement or its event log.
+
 ```typescript
+// agent-process.ts — your agent (existing process)
+import { AgentSecurity } from '@agent-security/core';
+import * as process from 'process';
+
+const security = new AgentSecurity({
+  policyBundle,
+  onAuditEvent: (event) => {
+    // Stream audit events to guardian process via IPC
+    if (process.send) process.send({ type: 'audit_event', event });
+  },
+});
+
+// guardian-process.ts — run as a SEPARATE Node.js process
 import { GuardianAgent, BLUEPRINT_FINANCE } from '@agent-security/guardian';
+import * as process from 'process';
 
 const guardian = new GuardianAgent({
   ...BLUEPRINT_FINANCE,
   auto_kill_threshold: 3,
-  onAnomaly: (incident) => {
-    alertSecurityTeam(incident);
-  },
+  onAnomaly: (incident) => alertSecurityTeam(incident),
   onKill: (agentId, reason) => {
-    console.log(`Agent ${agentId} terminated: ${reason}`);
-  },
-});
+    console.error(`[GUARDIAN] Terminated agent: ${agentId} — ${reason}`);
+);
 
-// Feed audit events from the core platform
-const security = new AgentSecurity({
-  policyBundle,
-  onAuditEvent: (event) => {
-    const incidents = guardian.processEvent(event);
-    // incidents: SecurityIncident[]
-  },
+// Receive audit events from agent process
+process.on('message', (msg: any) => {
+  if (msg.type === 'audit_event') {
+    guardian.processEvent(msg.event);
+  }
 });
-
-// Check if an agent was auto-killed
-guardian.isKilled('rogue-bot'); // true/false
-guardian.revive('rogue-bot');   // Restore access
 ```
 
 **Anomaly types:**

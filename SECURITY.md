@@ -45,6 +45,34 @@ Policy file loading uses path sanitization:
 - Missing approval callbacks result in denial.
 - Approval callback timeouts result in denial.
 
+### Trust Boundary
+
+Agent-SPM enforces security policies within the agent's process boundary. Understanding what this means in practice:
+
+**What in-process enforcement protects against:**
+- Prompt injection attacks that manipulate tool arguments
+- Policy violations and unauthorized tool calls
+- Rogue agent behavior (anomaly detection, auto-kill)
+- Data exfiltration via tool args (DLP classifiers)
+- Rate abuse and session limit violations
+
+**What requires additional layers:**
+- An agent process compromised at the code execution level (e.g. an RCE vulnerability in a dependency) could theoretically bypass in-process controls. For these environments:
+  - Run Guardian as a **separate observer process** (recommended for all production deployments)
+  - Stream audit events to an **external SIEM** in real time (required for forensic integrity)
+  - Use OS-level sandboxing (seccomp, AppArmor, container isolation) for the agent process itself
+
+**The layered model:**
+
+| Layer | Component | Protects Against |
+|-------|-----------|-----------------|
+| 1 | Agent-SPM in-process | Prompt injection, policy violations, behavioral anomalies |
+| 2 | Guardian (separate process) | Compromised agent process, blast radius containment |
+| 3 | SIEM streaming | Tampered local logs, forensic audit integrity |
+| 4 | OS sandboxing / Gateway | Full process compromise, network-level enforcement |
+
+Agent-SPM is Layer 1 and 2. Layers 3 and 4 are your responsibility to configure — this document tells you how.
+
 ### Data Redaction
 
 - Audit events use a `safe_payload` field containing redacted data only.
@@ -129,10 +157,23 @@ Agent-SPM is one layer in a defense-in-depth strategy.
    approvalTimeoutMs: 300_000 // 5 minutes — prevent hanging approvals
    ```
 
-7. **Export audit events to SIEM**
+7. **Export audit events to external SIEM (required in production)**
+
+   The in-memory audit log is a convenience for development. In production, it is not a forensic record — a compromised agent process could clear it. Always stream events to an external, append-only store as they happen:
    ```typescript
-   onAuditEvent: (event) => siem.send(socFormatter.toCef(event).raw)
+   onAuditEvent: (event) => {
+     // Events leave the process immediately — cannot be retroactively cleared
+     siem.send(socFormatter.toCef(event).raw); // Splunk, QRadar, Elastic
+   }
    ```
+
+   Recommended external stores:
+   - **Splunk / QRadar / Elastic** — via CEF/LEEF export (built-in)
+   - **S3 with Object Lock** — append-only, tamper-evident
+   - **Kafka** — immutable event stream, replay-capable
+   - **CloudWatch Logs** — for AWS-hosted agents
+
+  s step, your audit trail is not tamper-proof.
 
 8. **Configure guardian thresholds**
    Use `BLUEPRINT_FINANCE` or `BLUEPRINT_SOC` as starting points with `auto_kill_threshold` enabled.
