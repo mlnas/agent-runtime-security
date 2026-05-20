@@ -479,28 +479,7 @@ interface AgentSecurityConfig {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  ## 1. What this is and why it comes first
+## 1. What this is and why it comes first
 
   This is the canonical data model for a security finding in XSPM. The whole ASVS/CAF wrapper hangs off it:
 
